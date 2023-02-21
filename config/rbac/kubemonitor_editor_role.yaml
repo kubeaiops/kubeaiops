@@ -1,0 +1,31 @@
+# permissions for end users to edit kubemonitors.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: kubemonitor-editor-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: kubeaiops
+    app.kubernetes.io/part-of: kubeaiops
+    app.kubernetes.io/managed-by: kustomize
+  name: kubemonitor-editor-role
+rules:
+- apiGroups:
+  - aiops.kubeaiops.com
+  resources:
+  - kubemonitors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aiops.kubeaiops.com
+  resources:
+  - kubemonitors/status
+  verbs:
+  - get

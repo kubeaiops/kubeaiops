@@ -1,0 +1,80 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+  creationTimestamp: null
+  name: kubemonitors.aiops.kubeaiops.com
+spec:
+  group: aiops.kubeaiops.com
+  names:
+    kind: KubeMonitor
+    listKind: KubeMonitorList
+    plural: kubemonitors
+    singular: kubemonitor
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: KubeMonitor is the Schema for the kubemonitors API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: KubeMonitorSpec defines the desired state of KubeMonitor
+            properties:
+              cron:
+                type: string
+              workflow:
+                description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+                  Important: Run "make" to regenerate code after modifying this file'
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  source:
+                    type: string
+                type: object
+            required:
+            - cron
+            - workflow
+            type: object
+          status:
+            description: KubeMonitorStatus defines the observed state of KubeMonitor
+            properties:
+              createdAt:
+                description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
+                  of cluster Important: Run "make" to regenerate code after modifying
+                  this file'
+                format: date-time
+                type: string
+              failedCount:
+                type: integer
+              lastFailedAt:
+                format: date-time
+                type: string
+              status:
+                type: string
+              successCount:
+                type: integer
+              totalCount:
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

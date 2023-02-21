@@ -1,0 +1,27 @@
+# permissions for end users to view kubemonitors.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: kubemonitor-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: kubeaiops
+    app.kubernetes.io/part-of: kubeaiops
+    app.kubernetes.io/managed-by: kustomize
+  name: kubemonitor-viewer-role
+rules:
+- apiGroups:
+  - aiops.kubeaiops.com
+  resources:
+  - kubemonitors
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - aiops.kubeaiops.com
+  resources:
+  - kubemonitors/status
+  verbs:
+  - get
