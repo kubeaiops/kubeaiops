@@ -11,7 +11,7 @@ rules:
   - kubemonitors
   verbs:
   - create
-  - delete
+  - delete]
   - get
   - list
   - patch

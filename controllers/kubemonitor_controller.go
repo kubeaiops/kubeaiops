@@ -26,8 +26,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiopsv1alpha1 "github.com/kubeaiops/kubeaiops/api/v1alpha1"
+	"github.com/robfig/cron/v3"
 
 	//added codes
+	"fmt"
+
 	argowfv1alpha1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -41,7 +44,7 @@ type KubeMonitorReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors,verbs=get;list;watch;create;update;patch;delete]
 //+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors/finalizers,verbs=update
 
@@ -56,50 +59,46 @@ type KubeMonitorReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
 func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-
-	// TODO(user): your logic here
-
 	var kubeMonitor = &aiopsv1alpha1.KubeMonitor{}
 	if err := r.Get(ctx, req.NamespacedName, kubeMonitor); err != nil {
-		log.Error(err, "unable to fetch Service")
-		// we'll ignore not-found errors, since they can't be fixed by an immediate
-		// requeue (we'll need to wait for a new notification), and we can get them
-		// on deleted requests.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	argowf, err := r.argoWorkflowForKubeMonitor(kubeMonitor)
-	if err != nil {
-		log.Error(err, "failed to create argo workflow from Service")
+		log.Error(err, "unable to fetch KubeMonitor")
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Creating a new Workflow", "Workflow.Namespace", argowf.Namespace, "Workflow.Name", argowf.Name)
+	c := cron.New()
+	c.AddFunc(kubeMonitor.Spec.Cron, func() {
 
-	found := &argowfv1alpha1.Workflow{}
-	if err := r.Get(ctx, types.NamespacedName{Name: argowf.Name, Namespace: argowf.Namespace}, found); err != nil && errors.IsNotFound(err) {
-		if err := r.Create(ctx, argowf); err != nil {
-			log.Error(err, "Failed to create new Workflow", "Workflow.Namespace", argowf.Namespace, "Workflow.Name", argowf.Name)
-			return ctrl.Result{}, err
+		argowf, err := r.argoWorkflowForKubeMonitor(kubeMonitor)
+		if err != nil {
+			log.Error(err, "failed to create argo workflow from Service")
+			//return ctrl.Result{}, err
 		}
-		generatedName := argowf.GetName()
-		log.Info("Created Workflow", "generatedName", generatedName)
 
-		// Workflow created successfully - return and requeue
-		// return ctrl.Result{Requeue: true}, nil
+		log.Info("Creating a new Workflow", "Workflow.Namespace", argowf.Namespace, "Workflow.Name", argowf.Name)
+		found := &argowfv1alpha1.Workflow{}
+		if err := r.Get(ctx, types.NamespacedName{Name: argowf.Name, Namespace: argowf.Namespace}, found); err != nil && errors.IsNotFound(err) {
+			if err := r.Create(ctx, argowf); err != nil {
+				log.Error(err, "Failed to create new Workflow", "Workflow.Namespace", argowf.Namespace, "Workflow.Name", argowf.Name)
 
-		return ctrl.Result{}, nil
-	} else if err != nil {
-		log.Info("Failed to get argo Workflow")
-		return ctrl.Result{}, err
-	}
-
-	log.Info("Found argo Workflow", "name", found.Name, "namespace", found.Namespace)
+				//return ctrl.Result{}, err
+			}
+			generatedName := argowf.GetName()
+			log.Info("Created Workflow", "generatedName", generatedName)
+			// Workflow created successfully - return and requeue
+			//return ctrl.Result{}, nil
+		} else if err != nil {
+			log.Info("Failed to get argo Workflow")
+			//return ctrl.Result{}, err
+		}
+		log.Info("Found argo Workflow", "name", found.Name, "namespace", found.Namespace)
+	})
+	c.Start()
 
 	return ctrl.Result{}, nil
 }
 
 func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.KubeMonitor) (*argowfv1alpha1.Workflow, error) {
+
 	wf := &argowfv1alpha1.Workflow{}
 	b, err := yaml.ToJSON([]byte(km.Spec.Workflow.Source))
 	if err != nil {
@@ -109,13 +108,17 @@ func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.Kub
 	if err := json.Unmarshal(b, wf); err != nil {
 		return nil, err
 	}
+
 	wf.Namespace = km.Spec.Workflow.Namespace
 	wf.Name = km.Spec.Workflow.Name
 
 	// Set argo Workflow instance as the owner and controller
-	if err := ctrl.SetControllerReference(km, wf, r.Scheme); err != nil {
+	fmt.Println("Job executed with crontab: ", km.Spec.Cron)
+	ctrl.SetControllerReference(km, wf, r.Scheme)
+	if err != nil {
 		return nil, err
 	}
+
 	return wf, nil
 }
 
