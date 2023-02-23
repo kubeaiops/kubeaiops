@@ -35,6 +35,23 @@ spec:
           spec:
             description: KubeMonitorSpec defines the desired state of KubeMonitor
             properties:
+              arguments:
+                properties:
+                  parameters:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - name
+                      - value
+                      type: object
+                    type: array
+                required:
+                - parameters
+                type: object
               cron:
                 type: string
               workflow:
@@ -49,6 +66,7 @@ spec:
                     type: string
                 type: object
             required:
+            - arguments
             - cron
             - workflow
             type: object

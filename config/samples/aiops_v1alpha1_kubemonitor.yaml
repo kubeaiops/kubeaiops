@@ -12,6 +12,10 @@ metadata:
 spec:
   # TODO(user): Add fields here
   cron: "* * * * *"
+  arguments:
+    parameters:
+      - name: message
+        value: "Hello Argo 11"
   workflow:
     namespace: kubemonitor
     source: |-
@@ -20,13 +24,22 @@ spec:
       metadata:
         generateName: hello-world-    # name of the workflow spec
       spec:
+        arguments:
+          parameters:
+            - name: message
+              value: 'Hello Argo'
         entrypoint: whalesay          # invoke the whalesay template
         templates:
           - name: whalesay              # name of the template
+            inputs:
+              parameters:
+                - name: message
+                  value: '{{workflow.parameters.message}}'
             container:
               image: docker/whalesay
               command: [cowsay]
-              args: ["hello world"]
+              args:
+                - '{{inputs.parameters.message}}'
               resources:                # limit the resources
                 limits:
                   memory: 32Mi

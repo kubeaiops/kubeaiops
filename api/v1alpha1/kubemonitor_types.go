@@ -33,8 +33,18 @@ type Workflow struct {
 type KubeMonitorSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Workflow Workflow `json:"workflow"`
-	Cron     string   `json:"cron"`
+	Workflow  Workflow  `json:"workflow"`
+	Cron      string    `json:"cron"`
+	Arguments Arguments `json:"arguments"`
+}
+
+type Arguments struct {
+	Parameters []Parameters `json:"parameters"`
+}
+
+type Parameters struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // KubeMonitorStatus defines the observed state of KubeMonitor

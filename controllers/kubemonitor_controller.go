@@ -29,7 +29,6 @@ import (
 	"github.com/robfig/cron/v3"
 
 	//added codes
-	"fmt"
 
 	argowfv1alpha1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -59,14 +58,20 @@ type KubeMonitorReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
 func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
+	c := cron.New()
+	var cJob cron.EntryID
 	var kubeMonitor = &aiopsv1alpha1.KubeMonitor{}
 	if err := r.Get(ctx, req.NamespacedName, kubeMonitor); err != nil {
 		log.Error(err, "unable to fetch KubeMonitor")
+		if cJob != cron.EntryID(0) {
+			log.Info("Job is deleted", cJob)
+			c.Remove(cJob)
+			c.Stop()
+		}
 		return ctrl.Result{}, err
 	}
 
-	c := cron.New()
-	c.AddFunc(kubeMonitor.Spec.Cron, func() {
+	cJob, err := c.AddFunc(kubeMonitor.Spec.Cron, func() {
 
 		argowf, err := r.argoWorkflowForKubeMonitor(kubeMonitor)
 		if err != nil {
@@ -92,7 +97,13 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		log.Info("Found argo Workflow", "name", found.Name, "namespace", found.Namespace)
 	})
+
 	c.Start()
+
+	if err != nil {
+		log.Error(err, "Failed to on Workflow", kubeMonitor.Name)
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -113,7 +124,6 @@ func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.Kub
 	wf.Name = km.Spec.Workflow.Name
 
 	// Set argo Workflow instance as the owner and controller
-	fmt.Println("Job executed with crontab: ", km.Spec.Cron)
 	ctrl.SetControllerReference(km, wf, r.Scheme)
 	if err != nil {
 		return nil, err
