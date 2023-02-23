@@ -123,8 +123,9 @@ func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.Kub
 	}
 
 	wf.Namespace = km.Spec.Workflow.Namespace
-	wf.Name = km.Spec.Workflow.Name
+	//wf.Name = km.Spec.Workflow.Name
 
+	//wf.Spec.Arguments.Parameters = append(wf.Spec.Arguments.Parameters, []v1alpha1.Parameters{}... )
 	// Set argo Workflow instance as the owner and controller
 	ctrl.SetControllerReference(km, wf, r.Scheme)
 	if err != nil {
@@ -139,24 +140,6 @@ func (r *KubeMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiopsv1alpha1.KubeMonitor{}).
 		Complete(r)
-}
-
-func containsString(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-func removeString(slice []string, item string) []string {
-	for i, s := range slice {
-		if s == item {
-			return append(slice[:i], slice[i+1:]...)
-		}
-	}
-	return slice
 }
 
 // to import argoproject
