@@ -54,6 +54,8 @@ spec:
                 type: object
               cron:
                 type: string
+              maxWorkflowCount:
+                type: integer
               workflow:
                 description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
                   Important: Run "make" to regenerate code after modifying this file'
@@ -68,6 +70,7 @@ spec:
             required:
             - arguments
             - cron
+            - maxWorkflowCount
             - workflow
             type: object
           status:
