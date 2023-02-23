@@ -41,6 +41,7 @@ import (
 type KubeMonitorReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	cron   *cron.Cron
 }
 
 //+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors,verbs=get;list;watch;create;update;patch;delete]
@@ -60,7 +61,14 @@ type KubeMonitorReconciler struct {
 func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
 	log := log.FromContext(ctx)
-	c := cron.New()
+
+	if r.cron == nil {
+		r.cron = cron.New()
+	} else {
+		r.cron.Stop()
+	}
+
+	// Fetch the custom resource
 	var kubeMonitor = &aiopsv1alpha1.KubeMonitor{}
 	if err := r.Get(ctx, req.NamespacedName, kubeMonitor); err != nil {
 		if errors.IsNotFound(err) {
@@ -72,7 +80,7 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	_, err := c.AddFunc(kubeMonitor.Spec.Cron, func() {
+	_, err := r.cron.AddFunc(kubeMonitor.Spec.Cron, func() {
 		argowf, err := r.argoWorkflowForKubeMonitor(kubeMonitor)
 		if err != nil {
 			log.Error(err, "failed to create argo workflow from Service")
@@ -98,7 +106,7 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Error(err, "Failed to on Workflow", kubeMonitor.Name)
 		return ctrl.Result{}, err
 	}
-	c.Start()
+	r.cron.Start()
 	return ctrl.Result{}, nil
 }
 
