@@ -56,29 +56,27 @@ type KubeMonitorReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
+
 func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
 	log := log.FromContext(ctx)
 	c := cron.New()
-	var cJob cron.EntryID
 	var kubeMonitor = &aiopsv1alpha1.KubeMonitor{}
 	if err := r.Get(ctx, req.NamespacedName, kubeMonitor); err != nil {
-		log.Error(err, "unable to fetch KubeMonitor")
-		if cJob != cron.EntryID(0) {
-			log.Info("Job is deleted", cJob)
-			c.Remove(cJob)
-			c.Stop()
+		if errors.IsNotFound(err) {
+			// The custom resource was deleted, nothing to do
+			log.Info("no resource")
+			return ctrl.Result{}, nil
 		}
+		log.Error(err, "unable to fetch KubeMonitor")
 		return ctrl.Result{}, err
 	}
 
-	cJob, err := c.AddFunc(kubeMonitor.Spec.Cron, func() {
-
+	_, err := c.AddFunc(kubeMonitor.Spec.Cron, func() {
 		argowf, err := r.argoWorkflowForKubeMonitor(kubeMonitor)
 		if err != nil {
 			log.Error(err, "failed to create argo workflow from Service")
-			//return ctrl.Result{}, err
 		}
-
 		log.Info("Creating a new Workflow", "Workflow.Namespace", argowf.Namespace, "Workflow.Name", argowf.Name)
 		found := &argowfv1alpha1.Workflow{}
 		if err := r.Get(ctx, types.NamespacedName{Name: argowf.Name, Namespace: argowf.Namespace}, found); err != nil && errors.IsNotFound(err) {
@@ -90,21 +88,17 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			generatedName := argowf.GetName()
 			log.Info("Created Workflow", "generatedName", generatedName)
 			// Workflow created successfully - return and requeue
-			//return ctrl.Result{}, nil
 		} else if err != nil {
 			log.Info("Failed to get argo Workflow")
-			//return ctrl.Result{}, err
 		}
 		log.Info("Found argo Workflow", "name", found.Name, "namespace", found.Namespace)
 	})
-
-	c.Start()
 
 	if err != nil {
 		log.Error(err, "Failed to on Workflow", kubeMonitor.Name)
 		return ctrl.Result{}, err
 	}
-
+	c.Start()
 	return ctrl.Result{}, nil
 }
 
@@ -137,6 +131,24 @@ func (r *KubeMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiopsv1alpha1.KubeMonitor{}).
 		Complete(r)
+}
+
+func containsString(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+func removeString(slice []string, item string) []string {
+	for i, s := range slice {
+		if s == item {
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
 }
 
 // to import argoproject
