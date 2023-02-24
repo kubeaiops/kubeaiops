@@ -95,7 +95,6 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err := r.Get(ctx, types.NamespacedName{Name: argowf.Name, Namespace: argowf.Namespace}, found); err != nil && errors.IsNotFound(err) {
 			if err := r.Create(ctx, argowf); err != nil {
 				log.Error(err, "Failed to create new Workflow", "Workflow.Namespace", argowf.Namespace, "Workflow.Name", argowf.Name)
-
 				//return ctrl.Result{}, err
 			}
 			generatedName := argowf.GetName()
