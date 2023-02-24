@@ -19,19 +19,23 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiopsv1alpha1 "github.com/kubeaiops/kubeaiops/api/v1alpha1"
 	"github.com/robfig/cron/v3"
 
 	//added codes
-
 	argowfv1alpha1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
+	argoclientset "github.com/argoproj/argo-workflows/v3/pkg/client/clientset/versioned"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -40,8 +44,9 @@ import (
 // KubeMonitorReconciler reconciles a KubeMonitor object
 type KubeMonitorReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	cron   *cron.Cron
+	Scheme     *runtime.Scheme
+	cron       *cron.Cron
+	kubeclient *kubernetes.Clientset
 }
 
 //+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors,verbs=get;list;watch;create;update;patch;delete]
@@ -100,6 +105,11 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Info("Failed to get argo Workflow")
 		}
 		log.Info("Found argo Workflow", "name", found.Name, "namespace", found.Namespace)
+
+		// Delete all but the most recent 5 workflows.
+		if err := r.deleteOldWorkflows(ctx, kubeMonitor.Spec.Workflow.Namespace, kubeMonitor.Spec.MaxWorkflowCount); err != nil {
+			log.Error(err, "failed to delete old workflows")
+		}
 	})
 
 	if err != nil {
@@ -137,9 +147,40 @@ func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.Kub
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *KubeMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.kubeclient = kubernetes.NewForConfigOrDie(mgr.GetConfig())
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiopsv1alpha1.KubeMonitor{}).
 		Complete(r)
+}
+
+func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, namespace string, numToKeep int) error {
+	config, err := config.GetConfig()
+	if err != nil {
+		return err
+	}
+	// List all workflows in the namespace
+	clientset := argoclientset.NewForConfigOrDie(config).ArgoprojV1alpha1().Workflows(namespace)
+	workflows, err := clientset.List(ctx, metav1.ListOptions{
+		LabelSelector: "workflows.argoproj.io/completed=true",
+	})
+	if err != nil {
+		return err
+	}
+	// Delete all but the most recent 5 workflows
+	var numDeleted int
+	numWorkflows := len(workflows.Items)
+	if numWorkflows > numToKeep {
+		for i := 0; i < numWorkflows-numToKeep; i++ {
+			workflowName := workflows.Items[i].Name
+			err := clientset.Delete(ctx, workflowName, metav1.DeleteOptions{})
+			if err != nil {
+				return err
+			}
+			numDeleted++
+		}
+	}
+	fmt.Printf("Deleted %d old workflows in namespace %s\n", numDeleted, namespace)
+	return nil
 }
 
 // to import argoproject
