@@ -2,29 +2,32 @@ apiVersion: aiops.kubeaiops.com/v1alpha1
 kind: KubeMonitor
 metadata:
   labels:
-    app.kubernetes.io/name: kubemonitor
-    app.kubernetes.io/instance: kubemonitor-sample
-    app.kubernetes.io/part-of: kubeaiops
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: kubeaiops
-  name: kubemonitor-sample
-  namespace: kubemonitor
+    {{- include "kubeaiops.labels" . | nindent 4 }}
+  name: {{ include "kubeaiops.fullname" . }}-basicmonitor
+  namespace: {{ .Release.Namespace }}
 spec:
   # TODO(user): Add fields here
   cron: "* * * * *"
-  maxWorkflowCount: "5"
+  maxWorkflowCount: {{ .Values.maxWorkflowCount }}
   arguments:
     parameters:
       - name: message
         value: "Hello Argo 11"
   workflow:
-    namespace: kubemonitor
+    namespace: {{ .Release.Namespace }}
     source: |-
       apiVersion: argoproj.io/v1alpha1
       kind: Workflow                  # new type of k8s spec
       metadata:
         generateName: hello-world-    # name of the workflow spec
+        annotations:
+          workflows.argoproj.io/controller-instanceid: kubemonitor
       spec:
+        serviceAccountName:  {{ include "kubeaiops.serviceAccountName" . }}
+        archive: false
+        volumes:
+          - name: my-volume
+            emptyDir: {}
         arguments:
           parameters:
             - name: message
@@ -35,13 +38,16 @@ spec:
             inputs:
               parameters:
                 - name: message
-                  value: '{{workflow.parameters.message}}'
+                  value: {{`'{{ workflow.parameters.message}}'`}}
             container:
               image: docker/whalesay
               command: [cowsay]
               args:
-                - '{{inputs.parameters.message}}'
+                - {{`'{{ inputs.parameters.message}}'`}}
               resources:                # limit the resources
                 limits:
                   memory: 32Mi
                   cpu: 100m
+              volumeMounts:
+                - name: my-volume
+                  mountPath: /my-data
