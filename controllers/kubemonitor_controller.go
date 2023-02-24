@@ -170,7 +170,7 @@ func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, namespac
 	var numDeleted int
 	numWorkflows := len(workflows.Items)
 	if numWorkflows > numToKeep {
-		for i := 0; i < numWorkflows-numToKeep; i++ {
+		for i := 0; i <= numWorkflows-numToKeep; i++ {
 			workflowName := workflows.Items[i].Name
 			err := clientset.Delete(ctx, workflowName, metav1.DeleteOptions{})
 			if err != nil {
