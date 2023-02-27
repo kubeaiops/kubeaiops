@@ -4,6 +4,15 @@
 
 replicaCount: 1
 
+# Monitoring target cluster's information
+# Prometheus address sample -  "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
+# Mailgun address sample - "https://api.mailgun.net/v3/mail-domain/messages"
+# Mailgun kep sample - "api:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+monitoring:
+  prometheusAddress: ""
+  emailAddress: ""
+  mailgunServer: ""
+  mailgunKey: ""
 
 artifactRepository:
   secret:
@@ -20,9 +29,20 @@ image:
   repository: repo.kubeaiops.com/lab/kubeaiops
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
-
+  
 maxWorkflowCount: "5"
+
+localpvc:
+  # existingClaim:
+  # selectorLabels: {}
+  # subPath: ""
+  # storageClassName: default
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  # annotations: {}
+  finalizers:
+    - kubernetes.io/pvc-protection
 
 imagePullSecrets: []
 nameOverride: ""

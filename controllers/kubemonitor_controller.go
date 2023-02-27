@@ -85,6 +85,12 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	defer func() {
+		if r := recover(); r != nil {
+			log.Info("Review the logs: %v", r)
+		}
+	}()
+
 	_, err := r.cron.AddFunc(kubeMonitor.Spec.Cron, func() {
 		argowf, err := r.argoWorkflowForKubeMonitor(kubeMonitor)
 		if err != nil {
@@ -169,7 +175,7 @@ func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, namespac
 	var numDeleted int
 	numWorkflows := len(workflows.Items)
 	if numWorkflows > numToKeep {
-		for i := 0; i <= numWorkflows-numToKeep; i++ {
+		for i := 0; i < numWorkflows-numToKeep; i++ {
 			workflowName := workflows.Items[i].Name
 			err := clientset.Delete(ctx, workflowName, metav1.DeleteOptions{})
 			if err != nil {
