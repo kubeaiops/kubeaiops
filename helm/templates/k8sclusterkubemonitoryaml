@@ -1,0 +1,638 @@
+apiVersion: aiops.kubeaiops.com/v1alpha1
+kind: KubeMonitor
+metadata:
+  labels:
+    {{- include "kubeaiops.labels" . | nindent 4 }}
+  name: {{ include "kubeaiops.fullname" . }}-k8sbasic
+  namespace: {{ .Release.Namespace }}
+spec:
+  # TODO(user): Add fields here
+  cron: "*/5 * * * *"
+  maxWorkflowCount: {{ .Values.maxWorkflowCount }}
+  arguments:
+    parameters:
+      - name: workflow-param-1
+        value: {{ .Values.monitoring.prometheusAddress }}
+      - name: workflow-param-2
+        value: {{ .Values.monitoring.emailAddress }}
+      - name: workflow-param-3
+        value: {{ .Values.monitoring.mailgunKey }}
+      - name: workflow-param-4
+        value: {{ .Values.monitoring.mailgunServer }}
+  workflow:
+    namespace: {{ .Release.Namespace }}
+    source: |-
+      apiVersion: argoproj.io/v1alpha1
+      kind: Workflow
+      metadata:
+        labels:
+          serviceAccountName: {{ include "kubeaiops.serviceAccountName" . }}
+        generateName: k8smonitor-wf-
+      spec:
+        serviceAccountName: {{ include "kubeaiops.serviceAccountName" . }}
+        activeDeadlineSeconds: 300
+        arguments:
+          parameters:
+          - name: workflow-param-1
+            value: {{ .Values.monitoring.prometheusAddress }}
+          - name: workflow-param-2
+            value: {{ .Values.monitoring.emailAddress }}
+          - name: workflow-param-3    
+            value: {{ .Values.monitoring.mailgunKey }}
+          - name: workflow-param-4
+            value: {{ .Values.monitoring.mailgunServer }}
+        entrypoint: process-kubeaiops
+        volumes:
+        - name: task-pv-storage
+          persistentVolumeClaim:
+            claimName: {{ include "kubeaiops.fullname" . }}
+        templates:
+        - name: process-kubeaiops
+          steps:
+          - - name: delete-files
+              template: delete-files    
+          - - name: delete-bn-service0
+              template: delete-bn-service
+          - - name: delete-bn-pod0
+              template: delete-bn-pod            
+          - - name: create-bn-pod
+              template: create-bn-pod
+          - - name: create-bn-service
+              template: create-bn-service
+          - - name: collect-alerts
+              template: collect-alerts
+              arguments:
+                parameters:
+                - name: prometheus-address
+                  value: {{`"{{workflow.parameters.workflow-param-1}}"`}}
+          - - name: evaluate-resources
+              template: evaluate-resources
+              arguments:
+                parameters:
+                - name: firing-alerts
+                  value: {{`"{{steps.collect-alerts.outputs.parameters.firing-alerts}}"`}}
+                - name: prometheus-address
+                  value: {{`"{{workflow.parameters.workflow-param-1}}"`}}
+          - - name: delete-bn-service1
+              template: delete-bn-service
+          - - name: delete-bn-pod1
+              template: delete-bn-pod
+          - - name: execute-resolution
+              template: execute-resolution
+              when: {{`"{{steps.evaluate-resources.outputs.parameters.anomaly}}`}} == true"
+              arguments:
+                parameters:
+                - name: result-from-bn
+                  value: {{`"{{steps.evaluate-resources.outputs.parameters.result-from-bn}}"`}}
+                - name: anomaly
+                  value: {{`"{{steps.evaluate-resources.outputs.parameters.anomaly}}"`}}
+                - name: prometheus-address
+                  value: {{`"{{workflow.parameters.workflow-param-1}}"`}}
+          - - name: notify
+              template: send-email
+              when: {{`"{{steps.evaluate-resources.outputs.parameters.anomaly}}`}} == true"
+              arguments:
+                parameters:
+                - name: email
+                  value: {{`"{{workflow.parameters.workflow-param-2}}"`}}
+                - name: email-key
+                  value: {{`"{{workflow.parameters.workflow-param-3}}"`}}
+                - name: email-api
+                  value: {{`"{{workflow.parameters.workflow-param-4}}"`}}
+                - name: anomaly
+                  value: {{`"{{steps.evaluate-resources.outputs.parameters.anomaly}}"`}}
+
+        - name: collect-alerts
+          inputs:
+            parameters:
+              - name: prometheus-address
+          script:
+            image: repo.kubeaiops.com/lab/python-requests:latest
+            command: [python]
+            source: |
+              import time
+              import requests
+              import json
+              prometheus_path = {{`"{{inputs.parameters.prometheus-address}}"`}} + "/api/v1/alerts"
+              #print ('prometheus path: ', prometheus_path)
+              #response = requests.get("http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090/api/v1/alerts")
+              response = requests.get(prometheus_path)
+              responseJson = response.json().get("data")
+              alertObjects = responseJson["alerts"]
+              alerts_node, alerts_pod, alerts_pvc = list(), list(), list()
+              nodelist, podlist, pvclist = list(), list(), list()
+              alert_list_per_resource = list()
+              node, pod, pvc, namespace = '', '', '', ''
+              
+              #desolve alerts
+              for alerts in alertObjects:
+                alertName = alerts["labels"]["alertname"]
+                state = alerts["state"]
+                print ('alert labels--------', str(alerts['labels']))
+                for labels in alerts['labels']:
+                  if 'job' in labels: 
+                    job = alerts["labels"]["job"]
+                    #print("job: " + job)
+                  if 'container' in labels: 
+                    container = alerts["labels"]["container"]
+                    #print("container: " + container)
+                  if 'namespace' in labels: 
+                    namespace = alerts["labels"]["namespace"]
+                    #print("namespace: " + namespace)
+                  if 'severity' in labels: 
+                    severity = alerts["labels"]["severity"]
+                    #print("severity: " + severity)
+
+                  if 'node' in labels: 
+                    node = alerts["labels"]["node"]
+                    if node not in nodelist:
+                      nodelist.append({'node': node, 'namespace': namespace})
+                    #print("node: " + node)
+
+                  if 'pod' in labels: 
+                    pod = alerts["labels"]["pod"]
+                    if pod not in podlist:
+                      podlist.append({'pod': pod, 'namespace': namespace})
+                    #print("pod: " + pod)
+        
+                  if 'persistentvolumeclaim' in labels: 
+                    pvc = alerts["labels"]["persistentvolumeclaim"]
+                    if pvc not in pvclist:
+                      pvclist.append({'pvc': pvc, 'namespace': namespace})
+                    #print("pvc: " + pvc)
+
+                if state == 'firing' and node != '':
+                  alerts_node.append({'node': node, 'alert': alertName + severity.capitalize()})
+                if state == 'firing' and pod != '':
+                  alerts_pod.append({'pod': pod, 'alert': alertName + severity.capitalize()})
+                if state == 'firing' and pvc != '':
+                  alerts_pvc.append({'pvc': pvc, 'alert': alertName + severity.capitalize()})
+
+              #create node view on alerts
+              for n in nodelist:
+                node_list_string = '{"node": "' + n['node'] + '", "namespace": "", "inputAlerts": {' 
+                for a in alerts_node:
+                  if n['node'] == a['node']:
+                    node_list_string = node_list_string + '"' + a['alert'] +'": 1,'
+
+                node_list_string = node_list_string + ' }}'
+                node_list_string = node_list_string.replace(', }', '}')
+
+                #print ('node_list_string: ', node_list_string)
+                node_list_json = json.loads(node_list_string)
+                if node_list_json not in alert_list_per_resource:
+                  alert_list_per_resource.append(node_list_json) 
+
+              #create pod view on alerts
+              for p in podlist:
+                pod_list_string = '{"pod": "' + p['pod'] + '", "namespace": "' + p['namespace'] + '", "inputAlerts": {' 
+                for a in alerts_pod:
+                  if p['pod'] == a['pod']:
+                    pod_list_string = pod_list_string + '"' + a['alert'] +'": 1,'
+
+                pod_list_string = pod_list_string + ' }}'
+                pod_list_string = pod_list_string.replace(', }', '}')
+
+                #print ('pod_list_string: ', pod_list_string)
+                pod_list_json = json.loads(pod_list_string)
+                if pod_list_json not in alert_list_per_resource:
+                  alert_list_per_resource.append(pod_list_json) 
+
+              #create pvc view on alerts
+              for pvc in pvclist:
+                pvc_list_string = '{"pvc": "' + pvc['pvc'] + '", "namespace": "' + pvc['namespace'] + '", "inputAlerts": {' 
+                for a in alerts_pvc:
+                  if pvc['pvc'] == a['pvc']:
+                    pvc_list_string = pvc_list_string + '"' + a['alert'] +'": 1,'
+
+                pvc_list_string = pvc_list_string + ' }}'
+                pvc_list_string = pvc_list_string.replace(', }', '}')
+
+                print ('pvc_list_string: ', pvc_list_string)
+                pvc_list_json = json.loads(pvc_list_string)
+                if pvc_list_json not in alert_list_per_resource:
+                  alert_list_per_resource.append(pvc_list_json) 
+
+              print('--', alert_list_per_resource)
+              timestr = time.strftime("%Y%m%d-%H%M%S")
+              fileName = "/tmp/firing-alerts.yaml"
+              with open(fileName, "w") as f:
+                f.write(str(alert_list_per_resource))
+            volumeMounts:
+              - mountPath: "/tmp"
+                name: task-pv-storage
+          outputs:
+            parameters:
+            - name: firing-alerts
+              valueFrom: 
+                path: /tmp/firing-alerts.yaml
+        
+        - name: create-bn-pod
+          container:
+            image: "bitnami/kubectl"
+            command: 
+              - sh
+              - -c
+              - kubectl run bn -n {{ .Release.Namespace }} --image=repo.kubeaiops.com/lab/bn:latest --port=3399 --labels="app=bn"
+        
+        - name: create-bn-service
+          resource:
+            action: create
+            manifest: |
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: bn
+                namespace: {{ .Release.Namespace }}
+              spec:
+                type: ClusterIP
+                selector:
+                  app: bn
+                ports:
+                  - protocol: TCP
+                    port: 3399
+                    targetPort: 3399
+
+        - name: evaluate-resources
+          inputs: 
+            parameters:
+            - name: firing-alerts
+            - name: prometheus-address      
+          script:
+            image: repo.kubeaiops.com/lab/python-requests:latest
+            command: [python]
+            source: |
+              import requests
+              import json
+              anomalyThreshold = 0.5
+              from datetime import datetime, timedelta
+              input_alerts = {{`{{inputs.parameters.firing-alerts}}`}}
+              prometheus_address = {{`"{{inputs.parameters.prometheus-address}}"`}}
+              ds = datetime.now() - timedelta(hours = 6)
+              de = datetime.now()
+              start = ds.strftime('%Y-%m-%dT%H:%M:%SZ')
+              end = de.strftime('%Y-%m-%dT%H:%M:%SZ')
+              print('start', start)
+              print('end', end)
+              data = {}
+              anomaly= "false"
+              responseTotal = list()
+              i = 1
+              for alerts in input_alerts:
+                #print ('alert', str(alerts))
+
+                if "node" in alerts:
+                  inputAlertStr = json.dumps(alerts['inputAlerts'])
+                  inputAlertJson = json.loads(inputAlertStr)
+                  data = {"evaluationId": str(i), 
+                          "bayesianModelId": "NODEMODEL1",
+                          "inputAlerts": inputAlertJson}
+                  data_json = data
+                  bn_path = 'http://bn.{{ .Release.Namespace }}.svc.cluster.local:3399/predict_incident'
+                  response = requests.post(bn_path, json = data_json)
+                  responseJson = response.json()
+                  responseJson["node"] = alerts["node"]
+                  responseString = json.dumps(responseJson)
+                  responseString = responseString.replace("#PROMETHEUS_ADDRESS", prometheus_address)
+                  responseString = responseString.replace("#NODE", alerts["node"])
+                  responseString = responseString.replace("#START", start)
+                  responseString = responseString.replace("#END", end)
+                  responseJson = json.loads(responseString)
+
+                  print('node evaluation result', str(responseJson['predicted_score']))
+                  if float(responseJson['predicted_score']) > anomalyThreshold: 
+                    anomaly = "true"
+                    print ('node anomaly', str(responseJson))
+                    responseTotal.append(responseJson)
+                
+                if "pod" in alerts:
+                  inputAlertStr = json.dumps(alerts['inputAlerts'])
+                  inputAlertJson = json.loads(inputAlertStr)
+                  data = {'evaluationId': str(i), 
+                          'bayesianModelId': 'PODMODEL1',
+                          'inputAlerts': inputAlertJson}
+                  data_json = data
+                  bn_path = 'http://bn.{{ .Release.Namespace }}.svc.cluster.local:3399/predict_incident'
+                  response = requests.post(bn_path, json = data_json)
+                  responseJson = response.json()
+                  responseJson["pod"] = alerts["pod"]
+                  responseJson["namespace"] = alerts["namespace"]
+                  responseString = json.dumps(responseJson)
+                  responseString = responseString.replace("#PROMETHEUS_ADDRESS", prometheus_address)
+                  responseString = responseString.replace("#POD", alerts["pod"])
+                  responseString = responseString.replace("#NAMESPACE", alerts["namespace"])
+                  responseString = responseString.replace("#START", start)
+                  responseString = responseString.replace("#END", end)
+                  responseJson = json.loads(responseString)            
+
+                  print('pod evaluation result', str(responseJson['predicted_score']))
+                  if float(responseJson['predicted_score']) > anomalyThreshold: 
+                    anomaly = "true"
+                    print ('pod anomaly %s', str(responseJson))
+                    responseTotal.append(responseJson)
+
+                if "pvc" in alerts:
+                  inputAlertStr = json.dumps(alerts['inputAlerts'])
+                  inputAlertJson = json.loads(inputAlertStr)
+                  print ('pvc alert - ', str(inputAlertJson))
+                  data = {'evaluationId': str(i), 
+                          'bayesianModelId': 'PVCMODEL1',
+                          'inputAlerts': inputAlertJson}
+                  data_json = data
+                  bn_path = 'http://bn.{{ .Release.Namespace }}.svc.cluster.local:3399/predict_incident'
+                  response = requests.post(bn_path, json = data_json)
+                  responseJson = response.json()
+                  responseJson["pvc"] = alerts["pvc"]
+                  responseJson["namespace"] = alerts["namespace"]            
+                  responseString = json.dumps(responseJson)
+                  responseString = responseString.replace("#PROMETHEUS_ADDRESS", prometheus_address)
+                  responseString = responseString.replace("#PERSISTENTVOLUMECLAIM", alerts["pvc"])
+                  responseString = responseString.replace("#NAMESPACE", alerts["namespace"])
+                  responseString = responseString.replace("#START", start)
+                  responseString = responseString.replace("#END", end)
+                  responseJson = json.loads(responseString)
+
+                  print('pvc evaluation result', str(responseJson['predicted_score']))
+                  if float(responseJson['predicted_score']) > anomalyThreshold: 
+                    anomaly = "true"
+                    print ('pvc anomaly %s', str(responseJson))
+                    responseTotal.append(responseJson)
+                i += 1
+
+              fileName = "/tmp/anomaly.txt"
+              with open(fileName, "w") as f:
+                f.write(anomaly) #in case there is no anomaly
+
+              fileName = "/tmp/resultfrombn.yaml"
+              with open(fileName, "w") as f:
+                f.write(str(str(responseTotal)))
+            volumeMounts:
+              - mountPath: "/tmp"
+                name: task-pv-storage   
+          outputs:
+            parameters:
+            - name: result-from-bn
+              valueFrom:
+                path: /tmp/resultfrombn.yaml
+            - name: anomaly
+              valueFrom:
+                path: /tmp/anomaly.txt
+
+        - name: delete-bn-service
+          container:
+            image: "bitnami/kubectl"
+            command: 
+              - sh
+              - -c
+              - kubectl delete service bn -n {{ .Release.Namespace }} --ignore-not-found
+
+        - name: delete-bn-pod
+          container:
+            image: "bitnami/kubectl"
+            command: 
+              - sh
+              - -c
+              - kubectl delete pod bn -n {{ .Release.Namespace }} --ignore-not-found
+        
+        - name: execute-resolution
+          inputs:
+            parameters:
+              - name: result-from-bn    
+              - name: anomaly
+              - name: prometheus-address
+          script:
+            image: repo.kubeaiops.com/lab/python-requests:latest
+            command: [python]
+            source: |
+              import time
+              import requests
+              import json
+              import matplotlib.pyplot as plt
+              import datetime
+              import subprocess
+              import numexpr
+              import math
+              from fpdf import  FPDF
+
+              prometheus_path = {{`"{{inputs.parameters.prometheus-address}}"`}} + "/api/v1/query_range?query="
+              evaluation = {{`{{inputs.parameters.result-from-bn}}`}}
+              i=0
+              metricImageNameString = ""
+              k8sResultReport = ""
+              evaluationReport = ""
+
+              for eval in evaluation:
+                node = ''
+                pod = ''
+                pvc = ''
+                namespace = ''
+                affectedResource = ''
+                input = 'INIT'
+                inputUnit = ''
+                inputValue = 0
+                inputValueNumber = 0
+                inputFormula = ''
+                inputValueString = ''
+
+                resolution = eval['resolution_action']
+                if not resolution:
+                  print ('No resolution')
+                  continue
+                resolution.sort(key=lambda x: x.get('no'))
+                print ('eval----', eval)
+                if 'node' in eval:
+                  node = eval['node']
+                  affectedResource = affectedResource + node
+                if 'pod' in eval:
+                  pod = eval['pod']
+                  affectedResource = affectedResource + pod
+                if 'pvc' in eval:
+                  pvc = eval['pvc']
+                  affectedResource = affectedResource + pvc
+                if 'namespace' in eval:
+                  namespace = eval['namespace']
+                  affectedResource = affectedResource + ' /' + namespace
+
+                resolution_action = str(eval['resolution_action'])
+                resolution_action = resolution_action.replace('http://', "")
+
+                # create report
+                evaluationReport = evaluationReport + 'Evaluation_Id: ' + eval['evaluation_id'] + ' Model: ' + eval['bayesian_model_id'] + '\n'
+                evaluationReport = evaluationReport + '\t' + ' Affected Resource: ' +  affectedResource + '\n'
+                evaluationReport = evaluationReport + '\t' + ' Predicted_Score: ' + str(eval['predicted_score']) + '\n\t Alert_Group_Score: ' + str(eval['alert_group_score']) + '\n'
+                evaluationReport = evaluationReport + '\t' + ' Resolution_Action: ' + resolution_action + '\n\n'
+
+                # process actions...
+                for r in resolution:
+                  if r['resolutionType'] == 'P8S':
+                    title = r['resolutionName']
+                    resolutionActionFor = r['resolutionActionFor']
+                    prometheus_query = ""
+                    prometheus_query = r['resolutionAction']
+                    #print (prometheus_query)
+                    response = requests.get(prometheus_query)
+                    responseJson = response.json()
+                    result = responseJson['data']['result']
+                    time = list()
+                    value = list()
+
+                    for metric in result:
+                      for key in metric:
+                        if key == "metric":
+                          labels=metric[key]
+                        if key == "values":
+                          data = metric[key]
+                          for tv in data:
+                            date_time =  datetime.datetime.fromtimestamp( tv[0] )
+                            time.append (date_time)
+                            match resolutionActionFor:
+                              case 'MEMORY-BYTE':
+                                valueElement = float(tv[1]) / (1024*1024*1024)
+                              case 'NETWORK-BYTE':
+                                valueElement = float(tv[1]) / (1024*1024)
+                              case _:
+                                valueElement = float(tv[1])
+                            value.append (valueElement)
+                    
+                    plt.plot(time, value)
+                    plt.xlabel('time-utc')
+
+                    match resolutionActionFor:
+                      case 'MEMORY-BYTE':
+                        plt.ylabel('Gbyte')
+                      case 'CPU-CORE':
+                        plt.ylabel('CPU Core')
+                      case 'NETWORK-ERRORRATE':
+                        plt.ylabel('Network - Error Rate')
+                      case 'NETWORK-BYTE':
+                        plt.ylabel('Mbyte')
+                      case 'DISK-ACCESSRATE':
+                        plt.ylabel('Access Rate - Byte/s')
+                      case 'DISK-ACCESSLATENCY':
+                        plt.ylabel('Latency-ms')
+                      case _:
+                        plt.ylabel('Value')
+
+                    if node != '':
+                      title = title + ": " + node
+                    if pod != '':
+                      title = title + ": " + pod
+                    if pvc != '':
+                      title = title + ": " + pvc
+                    if namespace != '':
+                      title = title + " (namespace: " + namespace + ")"
+
+                    plt.title(title)
+                    filename = "/tmp/metrics" + str(i) + ".png"
+                    metricImageNameString = metricImageNameString + " -F attachment=@metrics" + str(i) + ".png"
+                    plt.savefig(filename, format="png", dpi=1200)
+                    plt.close()
+                    i = i + 1
+
+                  if r['resolutionType'] == 'K8S':
+                    title = r['resolutionName']
+                    resolutionActionFor = r['resolutionActionFor']
+                    k8s_command = ""
+                    k8s_command = r['resolutionAction']
+                    if r['input'] == input:
+                      inputFormulaFinal = str(inputValue) + r['inputFormula'] + " + " + str(inputValue)
+                      print ('inputFormulaFinal: ', inputFormulaFinal)
+                      inputValueNumber = numexpr.evaluate(inputFormulaFinal)
+                      #convert float to int not to break Gi down to Mi
+                      inputValueNumber = math.ceil(inputValueNumber)
+                      inputValueFinal = str(inputValueNumber) + inputUnit
+                      print ('inputValueFinal: ', inputValueFinal)
+                      k8s_command = k8s_command.replace(input, inputValueFinal)
+                      inputValue = ''
+                      inputUnit = ''
+
+                    response = subprocess.check_output(k8s_command, shell=True)
+                    #print ('type of response ', type(response)) # response's class is bytes. 
+                    if r['output'] != '' :
+                      input = r['output']
+                      inputValueString = response.decode()
+                      inputUnit =  r['outputUnit']
+                      inputValueString = inputValueString.replace(inputUnit, "")
+                      inputValueString = inputValueString.replace('"', "")
+                      inputValue = float(inputValueString)
+
+                    print ('k8s_command:', k8s_command)
+                    print ('Response of k8s command: ', response.decode())
+                    k8sResultReport = k8sResultReport + '\nK8s Command: ' + k8s_command + '\n'
+                    k8sResultReport = k8sResultReport + '\nResult: ' + response.decode() + '\n'
+
+                  if r['resolutionType'] == 'PYTHON':
+                    print ('resolutionAction by Python', r['resolutionAction'])
+                    exec(r['resolutionAction'])
+
+              fileName = "/tmp/metricImageName.txt"
+              with open(fileName, "w") as f:
+                f.write(metricImageNameString)
+
+              #convert response of k8s execution to POD file
+              pdf = FPDF(orientation="landscape", format="letter")
+              pdf.add_page()
+              pdf.set_font("Courier", size = 8)
+              pdf.multi_cell(0, 5, k8sResultReport, 1, 'L')
+              print ('k8sResultReport', k8sResultReport)
+              pdf.output("/tmp/k8s-report.pdf")
+
+              fileName = "/tmp/evaluation.txt"
+              with open(fileName, "w") as f:
+                f.write(evaluationReport)
+
+            volumeMounts:
+              - mountPath: "/tmp"
+                name: task-pv-storage  
+          outputs:
+            parameters:
+            - name: execute-result
+              valueFrom:
+                path: /tmp/evaluation.txt
+
+        - name: delete-files
+          container:
+            image: repo.kubeaiops.com/lab/helm-kubectl:latest
+            command:
+            - ! /bin/sh
+            - -c 
+            - |
+              cd /tmp
+              ls -al
+              fileCount=$(find . -type f |wc -l)
+              if [ $fileCount -gt 0 ] 
+              then
+              rm *.* 
+              fi
+              ls -al
+            volumeMounts:
+              - mountPath: "/tmp"
+                name: task-pv-storage  
+
+        - name: send-email
+          inputs:
+            parameters:
+              - name: email
+              - name: email-key
+              - name: email-api
+              - name: anomaly
+          container:
+            image: repo.kubeaiops.com/lab/helm-kubectl:latest
+            command:
+            - ! /bin/sh
+            - -c 
+            - |
+              cd /tmp
+              cat evaluation.txt
+              attachment=`cat metricImageName.txt`
+              report=`cat evaluation.txt`
+              output=$(curl -s --user {{`{{inputs.parameters.email-key}}`}} {{`{{inputs.parameters.email-api}}`}} \
+              -F from={{`{{inputs.parameters.email}}`}} -F to={{`{{inputs.parameters.email}}`}} \
+              -F subject='KubeAIOPS Anomaly Report' -F text="${report}" ${attachment} -F attachment=@k8s-report.pdf)
+              echo "curl response:"
+              echo "$output"
+              echo "-----end of evaluation"
+
+            volumeMounts:
+              - mountPath: "/tmp"
+                name: task-pv-storage

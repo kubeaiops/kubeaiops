@@ -1,0 +1,33 @@
+{{- if not .Values.localpvc.existingClaim}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubeaiops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeaiops.labels" . | nindent 4 }}
+  {{- with .Values.localpvc.annotations  }}
+  annotations:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+  {{- with .Values.localpvc.finalizers  }}
+  finalizers:
+{{ toYaml . | indent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- range .Values.localpvc.accessModes }}
+    - {{ . | quote }}
+    {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.localpvc.size | quote }}
+  {{- if .Values.localpvc.storageClassName }}
+  storageClassName: {{ .Values.localpvc.storageClassName }}
+  {{- end -}}
+  {{- with .Values.localpvc.selectorLabels }}
+  selector:
+    matchLabels:
+{{ toYaml . | indent 6 }}
+  {{- end }}
+{{- end -}}
