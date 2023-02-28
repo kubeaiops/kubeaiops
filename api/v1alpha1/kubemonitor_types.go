@@ -52,16 +52,18 @@ type Parameters struct {
 type KubeMonitorStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	CreatedAt    *metav1.Time `json:"createdAt,omitempty"`
-	LastFailedAt *metav1.Time `json:"lastFailedAt,omitempty"`
-	SuccessCount int          `json:"successCount,omitempty"`
-	FailedCount  int          `json:"failedCount,omitempty"`
-	TotalCount   int          `json:"totalCount,omitempty"`
-	Status       string       `json:"status,omitempty"`
+	WorkflowName   string      `json:"workflowName,omitempty"`
+	WorkflowStatus string      `json:"workflowStatus,omitempty"`
+	LastUpdateTime metav1.Time `json:"lastUpdateTime,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+// +kubebuilder:resource:path=kubemonitors,scope=Namespaced,shortName=km
+// +kubebuilder:printcolumn:name="Current Workflow Name",type=string,JSONPath=`.status.workflowName`
+// +kubebuilder:printcolumn:name="Current Workflow Status",type=string,JSONPath=`.status.workflowStatus`
+// +kubebuilder:printcolumn:name="Last Update",type=date,JSONPath=`.status.lastUpdateTime`
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // KubeMonitor is the Schema for the kubemonitors API
 type KubeMonitor struct {

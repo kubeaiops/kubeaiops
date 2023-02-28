@@ -14,11 +14,11 @@ spec:
       - name: workflow-param-1
         value: {{ .Values.monitoring.prometheusAddress }}
       - name: workflow-param-2
-        value: {{ .Values.monitoring.emailAddress }}
+        value: {{ .Values.email.emailAddress }}
       - name: workflow-param-3
-        value: {{ .Values.monitoring.mailgunKey }}
+        value: {{ .Values.email.mailgunKey }}
       - name: workflow-param-4
-        value: {{ .Values.monitoring.mailgunServer }}
+        value: {{ .Values.email.mailgunServer }}
   workflow:
     selector: {{ include "kubeaiops.fullname" . }}-k8sbasic
     namespace: {{ .Release.Namespace }}
@@ -38,11 +38,11 @@ spec:
           - name: workflow-param-1
             value: {{ .Values.monitoring.prometheusAddress }}
           - name: workflow-param-2
-            value: {{ .Values.monitoring.emailAddress }}
+            value: {{ .Values.email.emailAddress }}
           - name: workflow-param-3    
-            value: {{ .Values.monitoring.mailgunKey }}
+            value: {{ .Values.email.mailgunKey }}
           - name: workflow-param-4
-            value: {{ .Values.monitoring.mailgunServer }}
+            value: {{ .Values.email.mailgunServer }}
         entrypoint: process-kubeaiops
         volumes:
         - name: task-pv-storage
@@ -266,7 +266,7 @@ spec:
             source: |
               import requests
               import json
-              anomalyThreshold = 0.5
+              anomalyThreshold = {{ .Values.monitoring.anomalyThreshold }}
               from datetime import datetime, timedelta
               input_alerts = {{`{{inputs.parameters.firing-alerts}}`}}
               prometheus_address = {{`"{{inputs.parameters.prometheus-address}}"`}}

@@ -10,9 +10,13 @@ replicaCount: 1
 # Mailgun kep sample - "api:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 monitoring:
   prometheusAddress: ""
+  anomalyThreshold: "0.8"
+
+email:
   emailAddress: ""
   mailgunServer: ""
   mailgunKey: ""
+
 
 artifactRepository:
   secret:
