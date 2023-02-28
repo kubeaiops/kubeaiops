@@ -16,7 +16,7 @@ monitoring:
 
 artifactRepository:
   secret:
-    enabled: true
+    enabled: false
     name: mlpipeline-minio-artifact
     accesskey:
       name: accesskey

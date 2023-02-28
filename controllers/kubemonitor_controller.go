@@ -194,7 +194,7 @@ func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, selector
 			numDeleted++
 		}
 	}
-	fmt.Printf("Deleted %d old workflows in ns %s\n", numDeleted, namespace)
+	fmt.Printf("Deleted %d old workflows in the namespace %s\n", numDeleted, namespace)
 	return nil
 }
 
