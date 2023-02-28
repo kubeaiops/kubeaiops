@@ -12,7 +12,7 @@ spec:
     listKind: KubeMonitorList
     plural: kubemonitors
     shortNames:
-      - wf    
+      - km 
     singular: kubemonitor
   scope: Namespaced
   versions:

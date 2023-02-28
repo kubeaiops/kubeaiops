@@ -18,6 +18,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -59,6 +61,17 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+
+	// Read file version
+	version, err := ioutil.ReadFile("version")
+	if err != nil {
+		panic(err)
+	}
+	// Convert bytes to string and print
+	fmt.Println("--------------------------------------")
+	fmt.Println("kubeAIOPS version: ", string(version))
+	fmt.Println("--------------------------------------")
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
