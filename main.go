@@ -19,7 +19,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -63,9 +62,9 @@ func main() {
 	var probeAddr string
 
 	// Read file version
-	version, err := ioutil.ReadFile("version")
+	version, err := os.ReadFile("/workspace/version")
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	// Convert bytes to string and print
 	fmt.Println("--------------------------------------")
