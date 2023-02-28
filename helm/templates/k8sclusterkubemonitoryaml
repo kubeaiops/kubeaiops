@@ -20,15 +20,17 @@ spec:
       - name: workflow-param-4
         value: {{ .Values.monitoring.mailgunServer }}
   workflow:
+    selector: {{ include "kubeaiops.fullname" . }}-k8sbasic
     namespace: {{ .Release.Namespace }}
     source: |-
       apiVersion: argoproj.io/v1alpha1
       kind: Workflow
       metadata:
-        labels:
-          serviceAccountName: {{ include "kubeaiops.serviceAccountName" . }}
         generateName: k8smonitor-wf-
       spec:
+        workflowMetadata:
+          labels:
+            aiops.kubeaiops.com/selector: {{ include "kubeaiops.fullname" . }}-k8sbasic
         serviceAccountName: {{ include "kubeaiops.serviceAccountName" . }}
         activeDeadlineSeconds: 300
         arguments:

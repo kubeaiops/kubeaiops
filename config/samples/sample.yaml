@@ -18,13 +18,17 @@ spec:
       - name: message
         value: "Hello Argo 11"
   workflow:
+    selector: hello-world
     namespace: kubemonitor
     source: |-
-      apiVersion: argoproj.io/v1alpha1
-      kind: Workflow                  # new type of k8s spec
+      apiVersion: argoproj.io/v1alpha1 
+      kind: Workflow
       metadata:
         generateName: hello-world-    # name of the workflow spec
       spec:
+        workflowMetadata:
+          labels:
+            aiops.kubeaiops.com/selector: hello-world
         arguments:
           parameters:
             - name: message

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -112,7 +113,7 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Info("Found argo Workflow", "name", found.Name, "namespace", found.Namespace)
 
 		// Delete all but the most recent 5 workflows.
-		if err := r.deleteOldWorkflows(ctx, kubeMonitor.Spec.Workflow.Namespace, kubeMonitor.Spec.MaxWorkflowCount); err != nil {
+		if err := r.deleteOldWorkflows(ctx, kubeMonitor.Spec.Workflow.Selector, kubeMonitor.Spec.Workflow.Namespace, kubeMonitor.Spec.MaxWorkflowCount); err != nil {
 			log.Error(err, "failed to delete old workflows")
 		}
 	})
@@ -158,24 +159,33 @@ func (r *KubeMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, namespace string, numToKeep int) error {
+func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, selector string, namespace string, numToKeep int) error {
 	config, err := config.GetConfig()
 	if err != nil {
 		return err
 	}
 	// List all workflows in the namespace
+	labelSelector := fmt.Sprintf("aiops.kubeaiops.com/selector=%s,workflows.argoproj.io/completed=true", selector)
 	clientset := argoclientset.NewForConfigOrDie(config).ArgoprojV1alpha1().Workflows(namespace)
 	workflows, err := clientset.List(ctx, metav1.ListOptions{
-		LabelSelector: "workflows.argoproj.io/completed=true",
+		LabelSelector: labelSelector,
 	})
 	if err != nil {
 		return err
 	}
+
+	// Sort workflows by creation timestamp (newest to oldest)
+	sort.Slice(workflows.Items, func(i, j int) bool {
+		return workflows.Items[i].CreationTimestamp.Before(&workflows.Items[j].CreationTimestamp)
+	})
 	// Delete all but the most recent 5 workflows
 	var numDeleted int
 	numWorkflows := len(workflows.Items)
-	if numWorkflows > numToKeep {
-		for i := 0; i < numWorkflows-numToKeep; i++ {
+	fmt.Println("number of workflows:", numWorkflows, "selector: ", selector)
+	fmt.Println("max limit of workflows:", numToKeep, "selector: ", selector)
+
+	if numWorkflows >= numToKeep {
+		for i := 0; i <= numWorkflows-numToKeep; i++ {
 			workflowName := workflows.Items[i].Name
 			err := clientset.Delete(ctx, workflowName, metav1.DeleteOptions{})
 			if err != nil {
