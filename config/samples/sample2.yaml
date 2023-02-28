@@ -1,0 +1,51 @@
+apiVersion: aiops.kubeaiops.com/v1alpha1
+kind: KubeMonitor
+metadata:
+  labels:
+    app.kubernetes.io/name: kubemonitor
+    app.kubernetes.io/instance: kubemonitor-sample
+    app.kubernetes.io/part-of: kubeaiops
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kubeaiops
+  name: kubemonitor-sample2
+  namespace: kubemonitor
+spec:
+  # TODO(user): Add fields here
+  cron: "* * * * *"
+  maxWorkflowCount: 3
+  arguments:
+    parameters:
+      - name: message
+        value: "Hello Argo 11"
+  workflow:
+    selector: hello-world2
+    namespace: kubemonitor
+    source: |-
+      apiVersion: argoproj.io/v1alpha1 
+      kind: Workflow
+      metadata:
+        generateName: hello-world2-    # name of the workflow spec
+      spec:
+        workflowMetadata:
+          labels:
+            aiops.kubeaiops.com/selector: hello-world2
+        arguments:
+          parameters:
+            - name: message
+              value: 'Hello Argo'
+        entrypoint: whalesay          # invoke the whalesay template
+        templates:
+          - name: whalesay              # name of the template
+            inputs:
+              parameters:
+                - name: message
+                  value: '{{workflow.parameters.message}}'
+            container:
+              image: docker/whalesay
+              command: [cowsay]
+              args:
+                - '{{inputs.parameters.message}}'
+              resources:                # limit the resources
+                limits:
+                  memory: 32Mi
+                  cpu: 100m
