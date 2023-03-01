@@ -67,17 +67,20 @@ make run
 
 ### How to install KubeAIOPS to your Kubernetes cluster by Helm?
 1. Download Helm chart
-```helm repo add kubelab https://repo.kubeaiops.com/chartrepo/lab && helm repo update
+```sh
+helm repo add kubelab https://repo.kubeaiops.com/chartrepo/lab && helm repo update
 helm fetch kubelab/kubeaiops
 ``` 
 
 2. Edit the value.yaml file to enter your Prometheus address and email information to receive the result of anomaly resport
-```vim values.yaml
+```sh
+vim values.yaml
 cd helm
 ```
 
 3. Install helm chart
-```helm upgrade -install km --namespace km --create-namespace . -f values.yaml
+```sh
+helm upgrade -install km --namespace km --create-namespace . -f values.yaml
 ```
 
 ### Modifying the API definitions
