@@ -1,5 +1,5 @@
 # kubeaiops
-// TODO(user): Add simple overview of use/purpose
+KubeAIOPS evaluates Kubernetes system anomalies using Bayesian Network AI methodology and suggests predefined resolutions to correct misbehaviors in your Kubernetes cluster. It leverages the power of Prometheus as a central repository of metrics and anomaly evaluation rules, minimizing the burden of setting up a metric-based machine learning infrastructure for operation procedures. Argo Workflow is used to execute each evaluation and execution step.
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
@@ -64,6 +64,18 @@ make run
 ```
 
 **NOTE:** You can also run this in one step by running: `make install run`
+
+### How to install KubeAIOPS to your Kubernetes cluster by Helm?
+1. Download Helm chart
+``` helm repo add kubelab https://repo.kubeaiops.com/chartrepo/lab && helm repo update
+``` helm fetch kubelab/kubeaiops
+
+2. Edit the value.yaml file to enter your Prometheus address and email information to receive the result of anomaly resport
+```vim values.yaml
+```cd helm
+
+3. Install helm chart
+```helm upgrade -install km --namespace km --create-namespace . -f values.yaml
 
 ### Modifying the API definitions
 If you are editing the API definitions, generate the manifests such as CRs or CRDs using:
