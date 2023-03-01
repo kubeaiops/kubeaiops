@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,7 +30,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	aiopsv1alpha1 "github.com/kubeaiops/kubeaiops/api/v1alpha1"
 	"github.com/robfig/cron/v3"
@@ -47,14 +51,18 @@ import (
 // KubeMonitorReconciler reconciles a KubeMonitor object
 type KubeMonitorReconciler struct {
 	client.Client
-	Scheme               *runtime.Scheme
-	cron                 *cron.Cron
-	kubeclient           *kubernetes.Clientset
-	lastSpec             aiopsv1alpha1.KubeMonitorSpec
-	generatedName        string
-	workflowStatus       argowfv1alpha1.WorkflowPhase
-	lastUpdateTimeMetav1 metav1.Time
+	Scheme     *runtime.Scheme
+	cron       *cron.Cron
+	kubeclient *kubernetes.Clientset
+	lastSpec   aiopsv1alpha1.KubeMonitorSpec
+	lastStatus aiopsv1alpha1.KubeMonitorStatus
 }
+
+var (
+	mu            sync.Mutex
+	workflowsLock sync.Mutex
+	workflows     = make(map[string]bool) // keeps track of workflows that have already been created
+)
 
 //+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors,verbs=get;list;watch;create;update;patch;delete]
 //+kubebuilder:rbac:groups=aiops.kubeaiops.com,resources=kubemonitors/status,verbs=get;update;patch
@@ -78,7 +86,6 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Info("Review the logs: %v", r)
 		}
 	}()
-
 	// Fetch the custom resource
 	var kubeMonitor = &aiopsv1alpha1.KubeMonitor{}
 	if err := r.Get(ctx, req.NamespacedName, kubeMonitor); err != nil {
@@ -96,14 +103,27 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	// Store the current spec for the next reconcile loop
+	// Store the current spec and status for the next reconcile loop
 	r.lastSpec = kubeMonitor.Spec
+	r.lastStatus = kubeMonitor.Status
+
+	// Check if a workflow for this resource has already been created
+	workflowsLock.Lock()
+	if workflows[kubeMonitor.Name] {
+		workflowsLock.Unlock()
+		return ctrl.Result{}, nil
+	}
 
 	err := r.scheduleWorkflow(ctx, kubeMonitor)
 	if err != nil {
 		log.Error(err, "Failed to on Workflow", kubeMonitor.Name)
+		workflowsLock.Unlock()
 		return ctrl.Result{}, err
 	}
+
+	// Mark the workflow for this resource as created
+	workflows[kubeMonitor.Name] = true
+	workflowsLock.Unlock()
 
 	return ctrl.Result{}, nil
 }
@@ -111,17 +131,7 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *KubeMonitorReconciler) scheduleWorkflow(ctx context.Context, km *aiopsv1alpha1.KubeMonitor) error {
 
 	log := log.FromContext(ctx)
-
-	if r.cron == nil {
-		r.cron = cron.New()
-		r.cron.Start()
-	}
-
-	//var generatedName string
-	//var workflowStatus argowfv1alpha1.WorkflowPhase
-	//var lastUpdateTimeMetav1 metav1.Time
 	errCh := make(chan error)
-
 	go func() {
 		_, err := r.cron.AddFunc(km.Spec.Cron, func() {
 			argowf, err := r.argoWorkflowForKubeMonitor(km)
@@ -129,60 +139,27 @@ func (r *KubeMonitorReconciler) scheduleWorkflow(ctx context.Context, km *aiopsv
 				errCh <- err
 				return
 			}
-
 			log.Info("Creating a new Workflow", "Workflow.Namespace", argowf.Namespace)
-
 			found := &argowfv1alpha1.Workflow{}
+
 			if err := r.Get(ctx, types.NamespacedName{Name: argowf.Name, Namespace: argowf.Namespace}, found); err != nil && errors.IsNotFound(err) {
 				if err := r.Create(ctx, argowf); err != nil {
-					fmt.Println("can't fund workflow")
 					errCh <- err
 					return
 				}
-
-				r.generatedName = argowf.GetName()
-
-				for {
-					if err := r.Get(ctx, types.NamespacedName{Name: r.generatedName, Namespace: argowf.Namespace}, found); err == nil {
-						if found.Status.Phase != "" {
-							r.workflowStatus = found.Status.Phase
-							break
-						}
-					}
-					time.Sleep(1 * time.Second)
-				}
-
-				lastUpdateTime, err := time.Parse(time.RFC3339, found.ObjectMeta.CreationTimestamp.Format(time.RFC3339))
-				if err != nil {
-					errCh <- err
-					return
-				}
-				r.lastUpdateTimeMetav1 = metav1.NewTime(lastUpdateTime)
-
-				fmt.Println("-----Generated name---in go func", r.generatedName)
-				fmt.Println("-----workflowStatus---in go func", string(r.workflowStatus))
-				fmt.Println("-----lastUpdateTimeMetav1---in go func", r.lastUpdateTimeMetav1)
-
-				if err := r.updateKubeMonitorStatus(ctx, km); err != nil {
-					log.Error(err, "Failed to update KubeMonitor status", "KubeMonitor.Name", km.Name)
-					errCh <- err
-					return
-				}
-
+				// Spawn a goroutine to monitor the workflow status
+				go monitorWorkflowStatus(ctx, r.Client, argowf.GetName(), argowf.Namespace, km)
 				if err := r.deleteOldWorkflows(ctx, km.Spec.Workflow.Selector, km.Spec.Workflow.Namespace, km.Spec.MaxWorkflowCount); err != nil {
 					errCh <- err
 					return
 				}
-
 			} else if err != nil {
 				errCh <- err
-				log.Info("what's happening?")
 				return
+			} else {
+				log.Info("Workflow already exists", "Workflow.Namespace", argowf.Namespace)
 			}
-
-			log.Info("Found argo Workflow", "name", r.generatedName, "namespace", found.Namespace)
 		})
-
 		if err != nil {
 			errCh <- err
 			return
@@ -190,21 +167,20 @@ func (r *KubeMonitorReconciler) scheduleWorkflow(ctx context.Context, km *aiopsv
 
 		errCh <- nil
 	}()
-
 	if err := <-errCh; err != nil {
 		return err
 	}
-
 	return nil
 }
 
+/*
 func (r *KubeMonitorReconciler) updateKubeMonitorStatus(ctx context.Context, km *aiopsv1alpha1.KubeMonitor) error {
 	// Update the status of the custom resource
 	log := log.FromContext(ctx)
 
-	fmt.Println("generatedName-----------update", r.generatedName)
-	fmt.Println("argowf.Status.Phase-----------update", string(r.workflowStatus))
-	fmt.Println("lastUpdateTime-----------update", r.lastUpdateTimeMetav1)
+	//fmt.Println("generatedName-----------update", r.generatedName)
+	//fmt.Println("argowf.Status.Phase-----------update", string(r.workflowStatus))
+	//fmt.Println("lastUpdateTime-----------update", r.lastUpdateTimeMetav1)
 
 	km.Status = aiopsv1alpha1.KubeMonitorStatus{
 		WorkflowName:   r.generatedName,
@@ -218,6 +194,7 @@ func (r *KubeMonitorReconciler) updateKubeMonitorStatus(ctx context.Context, km 
 
 	return nil
 }
+*/
 
 func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.KubeMonitor) (*argowfv1alpha1.Workflow, error) {
 
@@ -245,6 +222,7 @@ func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.Kub
 }
 
 func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, selector string, namespace string, numToKeep int) error {
+	log := log.FromContext(ctx)
 	config, err := config.GetConfig()
 	if err != nil {
 		return err
@@ -266,8 +244,8 @@ func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, selector
 	// Delete all but the most recent 5 workflows
 	var numDeleted int
 	numWorkflows := len(workflows.Items)
-	fmt.Println("number of workflows:", numWorkflows, "selector: ", selector)
-	fmt.Println("max limit of workflows:", numToKeep, "selector: ", selector)
+	//fmt.Println("number of workflows:", numWorkflows, "selector: ", selector)
+	//fmt.Println("max limit of workflows:", numToKeep, "selector: ", selector)
 
 	if numWorkflows >= numToKeep {
 		for i := 0; i <= numWorkflows-numToKeep; i++ {
@@ -279,16 +257,49 @@ func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, selector
 			numDeleted++
 		}
 	}
-	fmt.Printf("Deleted %d old workflows in the namespace %s\n", numDeleted, namespace)
+	log.Info(fmt.Sprintf("Deleted %d old workflows in the namespace %s", numDeleted, namespace))
 	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *KubeMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	const ownerKey = ".metadata.controller"
+
+	for _, gvk := range []schema.GroupVersionKind{aiopsv1alpha1.SchemeBuilder.GroupVersion.WithKind("KubeMonitor")} {
+		// Create a new controller for this GVK
+		c, err := controller.New(fmt.Sprintf("%v-controller", gvk.Kind), mgr, controller.Options{
+			Reconciler: r,
+		})
+		if err != nil {
+			return err
+		}
+		// Watch the object type and enqueue object key
+		if err := c.Watch(&source.Kind{Type: &aiopsv1alpha1.KubeMonitor{}}, &handler.EnqueueRequestForObject{}); err != nil {
+			return err
+		}
+		// Set the owner reference of the child object to the parent object
+		if err := mgr.GetFieldIndexer().IndexField(context.Background(), &aiopsv1alpha1.KubeMonitor{}, ownerKey, func(rawObj client.Object) []string {
+			// grab the KubeMonitor object, extract the owner...
+			kubeMonitor := rawObj.(*aiopsv1alpha1.KubeMonitor)
+			owner := metav1.GetControllerOf(kubeMonitor)
+			if owner == nil {
+				return nil
+			}
+			// ...and if it's this object, add it to our list
+			if owner.APIVersion == gvk.GroupVersion().String() && owner.Kind == gvk.Kind {
+				return []string{owner.Name}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
 	r.kubeclient = kubernetes.NewForConfigOrDie(mgr.GetConfig())
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&aiopsv1alpha1.KubeMonitor{}).
-		Complete(r)
+	r.cron = cron.New()
+	r.cron.Start()
+
+	return nil
 }
 
 // to import argoproject
@@ -296,4 +307,49 @@ var _ = schema.GroupVersionResource{
 	Group:    "argoproj.io",
 	Version:  "v1alpha1",
 	Resource: "workflows",
+}
+
+func monitorWorkflowStatus(ctx context.Context, c client.Client, name string, namespace string, km *aiopsv1alpha1.KubeMonitor) {
+	log := log.FromContext(ctx)
+
+	for {
+		wf := &argowfv1alpha1.Workflow{}
+		i := 0
+		for {
+			if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, wf); err != nil {
+				// wait 5 sec to get workflow, sometimes this function is called too fast to get a created workflow
+				if i > 5 {
+					log.Info("Can't find or deleted workflow: " + name)
+					return
+				}
+			} else {
+				break
+			}
+			i++
+			time.Sleep(1 * time.Second)
+		}
+
+		if wf.Status.Phase == argowfv1alpha1.WorkflowSucceeded || wf.Status.Phase == argowfv1alpha1.WorkflowFailed || wf.Status.Phase == argowfv1alpha1.WorkflowRunning {
+			mu.Lock()
+			km.Status.WorkflowName = name
+			km.Status.WorkflowStatus = string(wf.Status.Phase)
+			lastUpdateTime, err := time.Parse(time.RFC3339, wf.ObjectMeta.CreationTimestamp.Format(time.RFC3339))
+			if err != nil {
+				log.Error(err, "error to convert CreationTimestamp - ")
+				mu.Unlock()
+				return
+			}
+			km.Status.LastUpdateTime = metav1.NewTime(lastUpdateTime)
+			if err := c.Status().Update(ctx, km); err != nil {
+				log.Error(err, "error to update KubeMonitor Status ")
+				mu.Unlock()
+				return
+			}
+			mu.Unlock()
+			if wf.Status.Phase != argowfv1alpha1.WorkflowRunning {
+				return
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
 }

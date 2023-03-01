@@ -62,7 +62,7 @@ type KubeMonitorStatus struct {
 // +kubebuilder:resource:path=kubemonitors,scope=Namespaced,shortName=km
 // +kubebuilder:printcolumn:name="Current Workflow Name",type=string,JSONPath=`.status.workflowName`
 // +kubebuilder:printcolumn:name="Current Workflow Status",type=string,JSONPath=`.status.workflowStatus`
-// +kubebuilder:printcolumn:name="Last Update",type=date,JSONPath=`.status.lastUpdateTime`
+// +kubebuilder:printcolumn:name="Workflow Created",type=date,JSONPath=`.status.lastUpdateTime`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // KubeMonitor is the Schema for the kubemonitors API

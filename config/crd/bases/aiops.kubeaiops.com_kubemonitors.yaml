@@ -25,7 +25,7 @@ spec:
       name: Current Workflow Status
       type: string
     - jsonPath: .status.lastUpdateTime
-      name: Last Update
+      name: Workflow Created
       type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
