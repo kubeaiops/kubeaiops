@@ -9,14 +9,13 @@ replicaCount: 1
 # Mailgun address sample - "https://api.mailgun.net/v3/mail-domain/messages"
 # Mailgun kep sample - "api:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 monitoring:
-  prometheusAddress: ""
+  prometheusAddress: "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
   anomalyThreshold: "0.8"
 
 email:
-  emailAddress: ""
-  mailgunServer: ""
-  mailgunKey: ""
-
+  emailAddress: "1ad1"
+  mailgunServer: "dd11"
+  mailgunKey: "1dd1"
 
 artifactRepository:
   secret:
@@ -40,7 +39,7 @@ localpvc:
   # existingClaim:
   # selectorLabels: {}
   # subPath: ""
-  # storageClassName: default
+  # storageClassName: standard
   accessModes:
     - ReadWriteOnce
   size: 1Gi
@@ -116,3 +115,6 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+argo: 
+  enabled: true

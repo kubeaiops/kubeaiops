@@ -16,6 +16,5 @@ spec:
       targetPort: http
       protocol: TCP
       name: metric
-
   selector:
     {{- include "kubeaiops.selectorLabels" . | nindent 4 }}

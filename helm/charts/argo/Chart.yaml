@@ -1,0 +1,18 @@
+apiVersion: v2
+name: argo
+description: A Helm chart for Kubernetes
+maintainers:
+- email: jerryum@gmail.com
+  name: Jerry Lee
+type: application
+version: 0.0.1
+appVersion: "3.3.4"
+crds:
+  - crd-clusterworfklow.yaml
+  - crd-cronworkflow.yaml
+  - crd-workflow.yaml
+  - crd-workflowartifact.yaml
+  - crd-workfloweventb.yaml
+  - crd-workflowtask.yaml
+  - crd-workflowtaskresult.yaml
+  - crd-workflowtemplate.yaml
