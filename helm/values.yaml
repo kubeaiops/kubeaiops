@@ -11,6 +11,7 @@ replicaCount: 1
 monitoring:
   prometheusAddress: "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
   anomalyThreshold: "0.8"
+  cron: "*/5 * * * *"
 
 email:
   emailAddress: "1ad1"
