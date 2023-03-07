@@ -14,9 +14,9 @@ monitoring:
   cron: "*/5 * * * *"
 
 email:
-  emailAddress: "1ad1"
-  mailgunServer: "dd11"
-  mailgunKey: "1dd1"
+  emailAddress: "aa11"
+  mailgunServer: "aa11"
+  mailgunKey: "aa11"
 
 artifactRepository:
   secret:

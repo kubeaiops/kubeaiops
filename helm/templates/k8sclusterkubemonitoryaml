@@ -6,8 +6,7 @@ metadata:
   name: {{ include "kubeaiops.fullname" . }}-k8sbasic
   namespace: {{ .Release.Namespace }}
 spec:
-  # TODO(user): Add fields here
-  cron: {{ .Values.monitoring.cron }}
+  cron: "{{ .Values.monitoring.cron }}"
   maxWorkflowCount: {{ .Values.maxWorkflowCount }}
   arguments:
     parameters:
