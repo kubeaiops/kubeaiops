@@ -64,8 +64,12 @@ func main() {
 	// Read file version
 	version, err := os.ReadFile("/workspace/version")
 	if err != nil {
+		version, err = os.ReadFile("./version")
+	}
+	if err != nil {
 		fmt.Println(err)
 	}
+
 	// Convert bytes to string and print
 	fmt.Println("--------------------------------------")
 	fmt.Println("kubeAIOPS version: ", string(version))

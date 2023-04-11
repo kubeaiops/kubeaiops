@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: kubeaiops  
   name: kubemonitor-basicmonitor
-  namespace: kubemonitor
+  namespace: km
 spec:
   # TODO(user): Add fields here
   cron: "*/5 * * * *"
@@ -24,7 +24,7 @@ spec:
       - name: workflow-param-4
         value: ""
   workflow:
-    namespace: kubemonitor
+    namespace: km
     source: |-
       apiVersion: argoproj.io/v1alpha1
       kind: Workflow
@@ -44,13 +44,33 @@ spec:
             value: "https://api.mailgun.net/v3/mg.nexclipper.io/messages"
           - name: workflow-param-4
             value: ""
+          - name: ENDPOINT
+            valueFrom:
+              configMapKeyRef:
+                name: my-minio-config
+                key: endpoint
+          - name: BUCKET
+            valueFrom:
+              configMapKeyRef:
+                name: my-minio-config
+                key: bucket
+          - name: ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: my-minio-secret
+                key: access-key
+          - name: SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: my-minio-secret
+                key: secret-key            
         entrypoint: process-metricops
         podGC:
           strategy: OnWorkflowSuccess
         volumes:
-        - name: task-pv-storage
-          persistentVolumeClaim:
-            claimName: claim1
+        - name: minio-volume
+          secret:
+            secretName: mlpipeline-minio-artifact
 
         templates:
         - name: process-metricops
@@ -225,8 +245,8 @@ spec:
               with open(fileName, "w") as f:
                 f.write(str(alert_list_per_resource))
             volumeMounts:
-              - mountPath: "/tmp"
-                name: task-pv-storage
+              - mountPath: "/mnt/minio"
+                name: minio-volume
           outputs:
             parameters:
             - name: firing-alerts
@@ -373,8 +393,8 @@ spec:
               with open(fileName, "w") as f:
                 f.write(str(str(responseTotal)))
             volumeMounts:
-              - mountPath: "/tmp"
-                name: task-pv-storage   
+              - mountPath: "/mnt/minio"
+                name: minio-volume   
           outputs:
             parameters:
             - name: result-from-bn
@@ -589,8 +609,8 @@ spec:
                 f.write(evaluationReport)
 
             volumeMounts:
-              - mountPath: "/tmp"
-                name: task-pv-storage  
+              - mountPath: "/mnt/minio"
+                name: minio-volume  
           outputs:
             parameters:
             - name: execute-result
@@ -613,8 +633,8 @@ spec:
               fi
               ls -al
             volumeMounts:
-              - mountPath: "/tmp"
-                name: task-pv-storage  
+              - mountPath: "/mnt/minio"
+                name: minio-volume  
 
         - name: send-email
           inputs:
@@ -641,5 +661,5 @@ spec:
               echo "end of evaluation"
 
             volumeMounts:
-              - mountPath: "/tmp"
-                name: task-pv-storage
+              - mountPath: "/mnt/minio"
+                name: minio-volume

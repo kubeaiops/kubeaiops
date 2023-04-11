@@ -19,15 +19,19 @@ email:
   mailgunKey: "aa11"
 
 artifactRepository:
+  config:
+    enabled: true
+    endpoint: 127.0.0.1:9000
+    bucket: kubeaiops 
   secret:
-    enabled: false
-    name: mlpipeline-minio-artifact
+    enabled: true
+    name: my-minio-secret
     accesskey:
       name: accesskey
       key:  minio
     secretkey:
       name: secretkey
-      key: minio123
+      key: minio123!
 
 image:
   repository: repo.kubeaiops.com/lab/kubeaiops

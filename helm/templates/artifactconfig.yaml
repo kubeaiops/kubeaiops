@@ -1,0 +1,12 @@
+{{- if .Values.artifactRepository.config.enabled -}}
+apiVersion: v1
+kind: Configmap
+metadata:
+  name: {{ .Values.artifactRepository.config.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeaiops.labels" . | nindent 4 }}
+data:
+  endpoint: {{ .Values.artifactRepository.config.endpoint }}
+  bucket: {{ .Values.artifactRepository.config.bucket }}
+{{- end }}  
