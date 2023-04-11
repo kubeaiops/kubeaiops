@@ -21,6 +21,7 @@ email:
 artifactRepository:
   config:
     enabled: true
+    name: my-minio-config
     endpoint: 127.0.0.1:9000
     bucket: kubeaiops 
   secret:

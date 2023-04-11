@@ -1,6 +1,6 @@
 {{- if .Values.artifactRepository.config.enabled -}}
 apiVersion: v1
-kind: Configmap
+kind: ConfigMap
 metadata:
   name: {{ .Values.artifactRepository.config.name }}
   namespace: {{ .Release.Namespace }}
