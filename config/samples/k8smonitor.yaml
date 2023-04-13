@@ -24,16 +24,20 @@ spec:
       - name: workflow-param-4
         value: ""
   workflow:
+    selector: kubemonitor-basicmonitor
     namespace: km
     source: |-
       apiVersion: argoproj.io/v1alpha1
       kind: Workflow
       metadata:
         labels:
-          serviceAccountName: kubeaiops-sa
+          serviceAccountName: km-kubeaiop
         generateName: k8s-monitor-
       spec:
-        serviceAccountName: kubeaiops-sa
+        workflowMetadata:
+          labels:
+            aiops.kubeaiops.com/selector: kubemonitor-basicmonitor
+        serviceAccountName: km-kubeaiop
         arguments:
           parameters:
           - name: workflow-param-1
@@ -44,22 +48,22 @@ spec:
             value: "https://api.mailgun.net/v3/mg.nexclipper.io/messages"
           - name: workflow-param-4
             value: ""
-          - name: ENDPOINT
+          - name: endpoint
             valueFrom:
               configMapKeyRef:
                 name: my-minio-config
                 key: endpoint
-          - name: BUCKET
+          - name: bucket
             valueFrom:
               configMapKeyRef:
                 name: my-minio-config
                 key: bucket
-          - name: ACCESS_KEY
+          - name: access-key
             valueFrom:
               secretKeyRef:
                 name: my-minio-secret
                 key: access-key
-          - name: SECRET_KEY
+          - name: secret-key
             valueFrom:
               secretKeyRef:
                 name: my-minio-secret
@@ -68,9 +72,9 @@ spec:
         podGC:
           strategy: OnWorkflowSuccess
         volumes:
-        - name: minio-volume
-          secret:
-            secretName: mlpipeline-minio-artifact
+        - name: ml-volume
+          persistentVolumeClaim:
+            claimName: km-kubeaiops        
 
         templates:
         - name: process-metricops
@@ -91,6 +95,15 @@ spec:
                 parameters:
                 - name: prometheus-address
                   value: "{{workflow.parameters.workflow-param-1}}"
+                - name: endpoint
+                  value: "{{workflow.parameters.endpoint}}"
+                - name: bucket
+                  value: "{{workflow.parameters.bucket}}"
+                - name: access-key
+                  value: "{{workflow.parameters.access-key}}"
+                - name: secret-key
+                  value: "{{workflow.parameters.secret-key}}"
+
           - - name: evaluate-resources
               template: evaluate-resources
               arguments:
@@ -132,6 +145,10 @@ spec:
           inputs:
             parameters:
               - name: prometheus-address
+              - name: endpoint
+              - name: bucket
+              - name: access-key
+              - name: secret-key
           script:
             image: repo.kubeaiops.com/lab/python-requests:latest
             command: [python]
@@ -139,6 +156,17 @@ spec:
               import time
               import requests
               import json
+              from minio import Minio
+              from minio.error import ResponseError
+
+              # Initialize Minio client
+              minClient = Minio(
+                  "{{inputs.parameters.endpoint}}",  # MinIO service endpoint
+                  access_key="{{inputs.parameters.access-key}}",
+                  secret_key="{{inputs.parameters.secret-key}}",
+                  secure=False,  # Disable SSL/TLS (use http instead of https)
+              )              
+
               prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/alerts"
               #print ('prometheus path: ', prometheus_path)
               #response = requests.get("http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090/api/v1/alerts")
@@ -244,9 +272,17 @@ spec:
               fileName = "/tmp/firing-alerts.yaml"
               with open(fileName, "w") as f:
                 f.write(str(alert_list_per_resource))
+
+              object_name = "firing-alerts-" + timestr + ".json"
+              client.put_object(
+                "{{inputs.parameters.bucket}}",
+                object_name,
+                json.dumps(alert_list_per_resource).encode("utf-8"),
+                len(json.dumps(alert_list_per_resource)),
+              )   
             volumeMounts:
-              - mountPath: "/mnt/minio"
-                name: minio-volume
+              - mountPath: "/temp"
+                name: ml-volume
           outputs:
             parameters:
             - name: firing-alerts
@@ -393,8 +429,8 @@ spec:
               with open(fileName, "w") as f:
                 f.write(str(str(responseTotal)))
             volumeMounts:
-              - mountPath: "/mnt/minio"
-                name: minio-volume   
+              - mountPath: "/temp"
+                name: ml-volume   
           outputs:
             parameters:
             - name: result-from-bn
@@ -405,7 +441,7 @@ spec:
                 path: /tmp/anomaly.txt
 
         - name: delete-bn-service
-          serviceAccountName: kubeaiops-sa
+          serviceAccountName: km-kubeaiops
           container:
             image: "bitnami/kubectl"
             command: 
@@ -609,8 +645,8 @@ spec:
                 f.write(evaluationReport)
 
             volumeMounts:
-              - mountPath: "/mnt/minio"
-                name: minio-volume  
+              - mountPath: "/temp"
+                name: ml-volume  
           outputs:
             parameters:
             - name: execute-result
@@ -633,8 +669,8 @@ spec:
               fi
               ls -al
             volumeMounts:
-              - mountPath: "/mnt/minio"
-                name: minio-volume  
+              - mountPath: "/temp"
+                name: ml-volume  
 
         - name: send-email
           inputs:
@@ -661,5 +697,5 @@ spec:
               echo "end of evaluation"
 
             volumeMounts:
-              - mountPath: "/mnt/minio"
-                name: minio-volume
+              - mountPath: "/temp"
+                name: ml-volume

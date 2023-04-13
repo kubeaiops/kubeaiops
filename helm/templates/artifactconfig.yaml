@@ -6,6 +6,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kubeaiops.labels" . | nindent 4 }}
+    workflows.argoproj.io/configmap-type: Parameter
 data:
   endpoint: {{ .Values.artifactRepository.config.endpoint }}
   bucket: {{ .Values.artifactRepository.config.bucket }}

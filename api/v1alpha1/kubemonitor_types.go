@@ -55,6 +55,7 @@ type KubeMonitorStatus struct {
 	WorkflowName   string      `json:"workflowName,omitempty"`
 	WorkflowStatus string      `json:"workflowStatus,omitempty"`
 	LastUpdateTime metav1.Time `json:"lastUpdateTime,omitempty"`
+	EntryID        string      `json:"entryID,omitempty"`
 }
 
 //+kubebuilder:object:root=true

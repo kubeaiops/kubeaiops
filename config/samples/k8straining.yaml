@@ -1,0 +1,268 @@
+apiVersion: aiops.kubeaiops.com/v1alpha1
+kind: KubeMonitor
+metadata:
+  labels:
+    app.kubernetes.io/name: kubemonitor
+    app.kubernetes.io/instance: kubemonitor-basicmonitor
+    app.kubernetes.io/part-of: kubeaiops
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kubeaiops  
+  name: km-sample
+  namespace: km
+spec:
+  # TODO(user): Add fields here
+  cron: "*/1 * * * *"
+  maxWorkflowCount: 2
+  arguments:
+    parameters:
+      - name: workflow-param-1
+        value: "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
+  workflow:
+    selector: km-sample
+    namespace: km
+    source: |-
+      apiVersion: argoproj.io/v1alpha1
+      kind: Workflow
+      metadata:
+        labels:
+          serviceAccountName: km-kubeaiops
+        generateName: k8s-monitor-
+      spec:
+        workflowMetadata:
+          labels:
+            aiops.kubeaiops.com/selector: km-sample
+        serviceAccountName: km-kubeaiops
+        arguments:
+          parameters:
+          - name: workflow-param-1
+            value: "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
+          - name: endpoint
+            valueFrom:
+              configMapKeyRef:
+                name: my-minio-config
+                key: endpoint
+          - name: bucket
+            valueFrom:
+              configMapKeyRef:
+                name: my-minio-config
+                key: bucket
+        entrypoint: process-metricops
+        podGC:
+          strategy: OnWorkflowSuccess
+        volumes:
+        - name: my-minio-secret
+          secret:
+            secretName: my-minio-secret
+        templates:
+        - name: process-metricops
+          steps:
+          - - name: collect-metrics
+              template: collect-metrics
+              arguments:
+                parameters:
+                - name: prometheus-address
+                  value: "{{workflow.parameters.workflow-param-1}}"
+                - name: endpoint
+                  value: "{{workflow.parameters.endpoint}}"
+                - name: bucket
+                  value: "{{workflow.parameters.bucket}}"
+
+        - name: collect-metrics
+          inputs:
+            parameters:
+              - name: prometheus-address
+              - name: endpoint
+              - name: bucket
+          script:
+            image: repo.kubeaiops.com/lab/python-requests:latest
+            command: [python]
+            source: |
+              import time
+              import requests
+              import json
+              from minio import Minio
+              from minio.error import S3Error
+              import os
+              import io
+              import pandas as pd
+              import logging
+              from functools import partial, reduce
+              
+              # Set up logging
+              logging.basicConfig(level=logging.INFO)
+              
+              timestr = time.strftime("%Y%m%d-%H%M")
+              # Initialize Minio client
+              minClient = Minio(
+                  "{{inputs.parameters.endpoint}}",  # MinIO service endpoint
+                  access_key=os.environ.get('access-key'),
+                  secret_key=os.environ.get('secret-key'),
+                  secure=False,  # Disable SSL/TLS (use http instead of https)
+              )        
+              # get list of Kubernetes node 
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_cpu:rate5m"
+              response1 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_cpu_iowait:rate5m"
+              response2 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_cpu_steal:rate5m"
+              response3 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_cpu_switching:rate5m"
+              response4 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_memory_util:ratio"
+              response5 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_memory_pagefaults:rate5m"
+              response6 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_memory_ook:rate5m"
+              response7 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_disk_iotime:rate5m"
+              response8 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_disk_readlatency:rate5m"
+              response9 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_disk_writelatency:rate5m"
+              response10 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_disk_spaceavail:ratio"
+              response11 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_disk_readrate:rate5m"
+              response12 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_disk_writttenrate:rate5m"
+              response13 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_network_receiveerror:rate5m"
+              response14 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_network_transmiterror:rate5m"
+              response15 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_network_throughtputin:rate5m"
+              response16 = requests.get(prometheus_path)
+              prometheus_path = "{{inputs.parameters.prometheus-address}}" + "/api/v1/query?query=node:node_network_throughtputout:rate5m"
+              response17 = requests.get(prometheus_path)
+
+
+              # extract the metrics data from response1
+              node_cpu_rate5m = response1.json()["data"]["result"]
+              node_cpu_rate5m_data = [{"node": m["metric"]["node"], "time": timestr, "node_cpu_rate5m": float(m["value"][1])} for m in node_cpu_rate5m]
+              # extract the metrics data from response2
+              node_cpu_iowait_rate5m = response2.json()["data"]["result"]
+              node_cpu_iowait_rate5m_data = [{"node": m["metric"]["node"], "node_cpu_iowait_rate5m": float(m["value"][1])} for m in node_cpu_iowait_rate5m]
+              # extract the metrics data from response3
+              node_cpu_steal_rate5m = response3.json()["data"]["result"]
+              node_cpu_steal_rate5m_data = [{"node": m["metric"]["node"], "node_cpu_steal_rate5m": float(m["value"][1])} for m in node_cpu_steal_rate5m]
+              # extract the metrics data from response4
+              node_cpu_switching_rate5m = response4.json()["data"]["result"]
+              node_cpu_switching_rate5m_data = [{"node": m["metric"]["node"], "node_cpu_switching_rate5m": float(m["value"][1])} for m in node_cpu_switching_rate5m]
+              # extract the metrics data from response5
+              node_memory_util_ratio = response5.json()["data"]["result"]
+              node_memory_util_ratio_data = [{"node": m["metric"]["node"], "node_memory_util_ratio": float(m["value"][1])} for m in node_memory_util_ratio]
+              # extract the metrics data from response6
+              node_memory_pagefaults_rate5m = response6.json()["data"]["result"]
+              node_memory_pagefaults_rate5m_data = [{"node": m["metric"]["node"], "node_memory_pagefaults_rate5m": float(m["value"][1])} for m in node_memory_pagefaults_rate5m]
+              # extract the metrics data from response7
+              node_memory_ook_rate5m = response7.json()["data"]["result"]
+              node_memory_ook_rate5m_data = [{"node": m["metric"]["node"], "node_memory_ook_rate5m": float(m["value"][1])} for m in node_memory_ook_rate5m]
+              # extract the metrics data from response8
+              node_disk_iotime_rate5m = response8.json()["data"]["result"]
+              node_disk_iotime_rate5m_data = [{"node": m["metric"]["node"], "node_disk_iotime_rate5m": float(m["value"][1])} for m in node_disk_iotime_rate5m]
+              # extract the metrics data from response9
+              node_disk_readlatency_rate5m = response9.json()["data"]["result"]
+              node_disk_readlatency_rate5m_data = [{"node": m["metric"]["node"], "node_disk_readlatency_rate5m": float(m["value"][1])} for m in node_disk_readlatency_rate5m]
+              # extract the metrics data from response10
+              node_disk_writelatency_rate5m = response10.json()["data"]["result"]
+              node_disk_writelatency_rate5m_data = [{"node": m["metric"]["node"], "node_disk_writelatency_rate5m": float(m["value"][1])} for m in node_disk_writelatency_rate5m]
+              # extract the metrics data from response11
+              node_disk_spaceavail_ratio = response11.json()["data"]["result"]
+              node_disk_spaceavail_ratio_data = [{"node": m["metric"]["node"], "node_disk_spaceavail_ratio": float(m["value"][1])} for m in node_disk_spaceavail_ratio]
+              # extract the metrics data from response12
+              node_disk_readrate_rate5m = response12.json()["data"]["result"]
+              node_disk_readrate_rate5m_data = [{"node": m["metric"]["node"], "node_disk_readrate_rate5m": float(m["value"][1])} for m in node_disk_readrate_rate5m]
+              # extract the metrics data from response13
+              node_disk_writtenrate_rate5m = response13.json()["data"]["result"]
+              node_disk_writtenrate_rate5m_data = [{"node": m["metric"]["node"], "node_disk_writtenrate_rate5m": float(m["value"][1])} for m in node_disk_writtenrate_rate5m]
+              # extract the metrics data from response14
+              node_network_receiveerror_rate5m = response14.json()["data"]["result"]
+              node_network_receiveerror_rate5m_data = [{"node": m["metric"]["node"], "node_network_receiveerror_rate5m": float(m["value"][1])} for m in node_network_receiveerror_rate5m]
+              # extract the metrics data from response15
+              node_network_transmiterror_rate5m = response15.json()["data"]["result"]
+              node_network_transmiterror_rate5m_data = [{"node": m["metric"]["node"], "node_network_transmiterror_rate5m": float(m["value"][1])} for m in node_network_transmiterror_rate5m]
+              # extract the metrics data from response16
+              node_network_throughtputin_rate5m = response15.json()["data"]["result"]
+              node_network_throughtputin_rate5m_data = [{"node": m["metric"]["node"], "node_network_throughtputin_rate5m": float(m["value"][1])} for m in node_network_throughtputin_rate5m]
+              # extract the metrics data from response17
+              node_network_throughtputout_rate5m = response15.json()["data"]["result"]
+              node_network_throughtputout_rate5m_data = [{"node": m["metric"]["node"], "node_network_throughtputout_rate5m": float(m["value"][1])} for m in node_network_throughtputout_rate5m]
+
+              # merge the metrics data based on the node label
+              df_list = [
+                pd.DataFrame(node_cpu_rate5m_data),
+                pd.DataFrame(node_cpu_iowait_rate5m_data),
+                pd.DataFrame(node_cpu_steal_rate5m_data),
+                pd.DataFrame(node_cpu_switching_rate5m_data),
+                pd.DataFrame(node_memory_util_ratio_data),
+                pd.DataFrame(node_memory_pagefaults_rate5m_data),
+                pd.DataFrame(node_memory_ook_rate5m_data),
+                pd.DataFrame(node_disk_iotime_rate5m_data),
+                pd.DataFrame(node_disk_readlatency_rate5m_data),
+                pd.DataFrame(node_disk_writelatency_rate5m_data),
+                pd.DataFrame(node_disk_spaceavail_ratio_data),
+                pd.DataFrame(node_disk_readrate_rate5m_data),
+                pd.DataFrame(node_disk_writtenrate_rate5m_data),
+                pd.DataFrame(node_network_receiveerror_rate5m_data),
+                pd.DataFrame(node_network_transmiterror_rate5m_data),
+                pd.DataFrame(node_network_throughtputin_rate5m_data),
+                pd.DataFrame(node_network_throughtputout_rate5m_data),
+              ]
+
+              for i, df in enumerate(df_list):
+                print(f"Unique nodes in dataframe {i+1}: {df['node'].unique()}")
+
+              # Define a function to merge two DataFrames using a left join
+              merge_left = partial(pd.merge, how='left', on='node')
+
+              # Merge all DataFrames using a left join
+              df_merged = reduce(merge_left, df_list)
+
+              bucket = "{{inputs.parameters.bucket}}"
+              file_name = "metric.csv"
+              found = minClient.bucket_exists(bucket)
+              if not found:
+                  minClient.make_bucket(bucket)
+
+              try:
+                object_exists = minClient.stat_object(bucket, file_name)
+                if object_exists:
+                    # If the file exists, download it to a pandas DataFrame
+                    data = minClient.get_object(bucket, file_name)
+                    df_minio = pd.read_csv(io.BytesIO(data.read()))
+
+                    # Exclude the header row from the downloaded DataFrame
+                    # df_minio = df_minio.iloc[1:]
+
+                    # Append the new data to downloaded Dataframe
+                    df_merged = pd.concat([df_minio, df_merged], ignore_index=True)
+
+                # write the merged data to a CSV file
+                csv_data = df_merged.to_csv(index=False)
+
+                minClient.put_object(
+                    bucket,
+                    "metric.csv",
+                    io.BytesIO(csv_data.encode('utf-8')),
+                    len(csv_data.encode('utf-8')),
+                )
+              except Exception as e:
+                # Handle exceptions gracefully
+                logging.error(f"Error while checking if the object exists: {str(e)}")
+
+            env:
+            - name: access-key
+              valueFrom:
+                secretKeyRef:
+                  name: my-minio-secret 
+                  key: accesskey
+            - name: secret-key
+              valueFrom:
+                secretKeyRef:
+                  name: my-minio-secret 
+                  key: secretkey
+
+            volumeMounts:
+              - mountPath: "/secret/mountpath"
+                name: my-minio-secret
+          

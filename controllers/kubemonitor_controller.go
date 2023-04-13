@@ -90,11 +90,10 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	var kubeMonitor = &aiopsv1alpha1.KubeMonitor{}
 	if err := r.Get(ctx, req.NamespacedName, kubeMonitor); err != nil {
 		if errors.IsNotFound(err) {
-			// The custom resource was deleted, nothing to do
-			log.Info("no resource")
+			// The custom resource was deleted...
+			log.Info("KubeMonitor deleted")
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "unable to fetch KubeMonitor")
 		return ctrl.Result{}, err
 	}
 
@@ -128,12 +127,30 @@ func (r *KubeMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-func (r *KubeMonitorReconciler) scheduleWorkflow(ctx context.Context, km *aiopsv1alpha1.KubeMonitor) error {
+type CustomCronJob struct {
+	CronEntryID cron.EntryID
+	jobFunc     func()
+}
 
+func (ccj *CustomCronJob) Run() {
+	ccj.jobFunc()
+}
+
+func (r *KubeMonitorReconciler) scheduleWorkflow(ctx context.Context, km *aiopsv1alpha1.KubeMonitor) error {
 	log := log.FromContext(ctx)
 	errCh := make(chan error)
+
 	go func() {
-		_, err := r.cron.AddFunc(km.Spec.Cron, func() {
+		customCronJob := &CustomCronJob{}
+		customCronJob.jobFunc = func() {
+			log.Info("Running cron job for KubeMonitor", "KubeMonitor.Name", km.Name, "KubeMonitor.Namespace", km.Namespace)
+			// Check if the KubeMonitor resource still exists
+			_, err := r.getKubeMonitor(ctx, km.Name, km.Namespace)
+			if err != nil {
+				// The KubeMonitor has been deleted, remove the cron job
+				r.cron.Remove(customCronJob.CronEntryID)
+				return
+			}
 			argowf, err := r.argoWorkflowForKubeMonitor(km)
 			if err != nil {
 				errCh <- err
@@ -141,7 +158,6 @@ func (r *KubeMonitorReconciler) scheduleWorkflow(ctx context.Context, km *aiopsv
 			}
 			log.Info("Creating a new Workflow", "Workflow.Namespace", argowf.Namespace)
 			found := &argowfv1alpha1.Workflow{}
-
 			if err := r.Get(ctx, types.NamespacedName{Name: argowf.Name, Namespace: argowf.Namespace}, found); err != nil && errors.IsNotFound(err) {
 				if err := r.Create(ctx, argowf); err != nil {
 					errCh <- err
@@ -159,17 +175,59 @@ func (r *KubeMonitorReconciler) scheduleWorkflow(ctx context.Context, km *aiopsv
 			} else {
 				log.Info("Workflow already exists", "Workflow.Namespace", argowf.Namespace)
 			}
-		})
+		}
+		var err error
+		customCronJob.CronEntryID, err = r.cron.AddJob(km.Spec.Cron, customCronJob)
 		if err != nil {
 			errCh <- err
 			return
 		}
-
 		errCh <- nil
 	}()
+
 	if err := <-errCh; err != nil {
 		return err
 	}
+	return nil
+}
+
+func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, selector string, namespace string, numToKeep int) error {
+	log := log.FromContext(ctx)
+	config, err := config.GetConfig()
+	if err != nil {
+		return err
+	}
+	// List all workflows in the namespace
+	labelSelector := fmt.Sprintf("aiops.kubeaiops.com/selector=%s,workflows.argoproj.io/completed=true", selector)
+	clientset := argoclientset.NewForConfigOrDie(config).ArgoprojV1alpha1().Workflows(namespace)
+	workflows, err := clientset.List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Sort workflows by creation timestamp (newest to oldest)
+	sort.Slice(workflows.Items, func(i, j int) bool {
+		return workflows.Items[i].CreationTimestamp.Before(&workflows.Items[j].CreationTimestamp)
+	})
+	// Delete all but the most recent 5 workflows
+	var numDeleted int
+	numWorkflows := len(workflows.Items)
+	fmt.Println("number of workflows:", numWorkflows, "selector: ", selector)
+	fmt.Println("max limit of workflows:", numToKeep, "selector: ", selector)
+
+	if numWorkflows >= numToKeep {
+		for i := 0; i <= numWorkflows-numToKeep; i++ {
+			workflowName := workflows.Items[i].Name
+			err := clientset.Delete(ctx, workflowName, metav1.DeleteOptions{})
+			if err != nil {
+				return err
+			}
+			numDeleted++
+		}
+	}
+	log.Info(fmt.Sprintf("Deleted %d old workflows in the namespace %s", numDeleted, namespace))
 	return nil
 }
 
@@ -221,46 +279,6 @@ func (r *KubeMonitorReconciler) argoWorkflowForKubeMonitor(km *aiopsv1alpha1.Kub
 	return wf, nil
 }
 
-func (r *KubeMonitorReconciler) deleteOldWorkflows(ctx context.Context, selector string, namespace string, numToKeep int) error {
-	log := log.FromContext(ctx)
-	config, err := config.GetConfig()
-	if err != nil {
-		return err
-	}
-	// List all workflows in the namespace
-	labelSelector := fmt.Sprintf("aiops.kubeaiops.com/selector=%s,workflows.argoproj.io/completed=true", selector)
-	clientset := argoclientset.NewForConfigOrDie(config).ArgoprojV1alpha1().Workflows(namespace)
-	workflows, err := clientset.List(ctx, metav1.ListOptions{
-		LabelSelector: labelSelector,
-	})
-	if err != nil {
-		return err
-	}
-
-	// Sort workflows by creation timestamp (newest to oldest)
-	sort.Slice(workflows.Items, func(i, j int) bool {
-		return workflows.Items[i].CreationTimestamp.Before(&workflows.Items[j].CreationTimestamp)
-	})
-	// Delete all but the most recent 5 workflows
-	var numDeleted int
-	numWorkflows := len(workflows.Items)
-	//fmt.Println("number of workflows:", numWorkflows, "selector: ", selector)
-	//fmt.Println("max limit of workflows:", numToKeep, "selector: ", selector)
-
-	if numWorkflows >= numToKeep {
-		for i := 0; i <= numWorkflows-numToKeep; i++ {
-			workflowName := workflows.Items[i].Name
-			err := clientset.Delete(ctx, workflowName, metav1.DeleteOptions{})
-			if err != nil {
-				return err
-			}
-			numDeleted++
-		}
-	}
-	log.Info(fmt.Sprintf("Deleted %d old workflows in the namespace %s", numDeleted, namespace))
-	return nil
-}
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *KubeMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	const ownerKey = ".metadata.controller"
@@ -310,6 +328,7 @@ var _ = schema.GroupVersionResource{
 }
 
 func monitorWorkflowStatus(ctx context.Context, c client.Client, name string, namespace string, km *aiopsv1alpha1.KubeMonitor) {
+
 	log := log.FromContext(ctx)
 
 	for {
@@ -352,4 +371,12 @@ func monitorWorkflowStatus(ctx context.Context, c client.Client, name string, na
 		}
 		time.Sleep(1 * time.Second)
 	}
+}
+
+func (r *KubeMonitorReconciler) getKubeMonitor(ctx context.Context, name, namespace string) (*aiopsv1alpha1.KubeMonitor, error) {
+	kubeMonitor := &aiopsv1alpha1.KubeMonitor{}
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, kubeMonitor); err != nil {
+		return nil, err
+	}
+	return kubeMonitor, nil
 }
