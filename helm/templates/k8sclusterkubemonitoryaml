@@ -359,12 +359,12 @@ spec:
                     responseTotal.append(responseJson)
                 i += 1
 
-              fileName = "/tmp/anomaly.txt"
-              with open(fileName, "w") as f:
+              fileName1 = "/tmp/anomaly.txt"
+              with open(fileName1, "w") as f:
                 f.write(anomaly) #in case there is no anomaly
 
-              fileName = "/tmp/resultfrombn.yaml"
-              with open(fileName, "w") as f:
+              fileName2 = "/tmp/resultfrombn.yaml"
+              with open(fileName2, "w") as f:
                 f.write(str(str(responseTotal)))
 
               if "{{ .Values.minio.enabled }}" :
@@ -400,14 +400,14 @@ spec:
                 minio_client.fput_object(
                     minio_bucket,
                     "anomaly-" + end + ".txt",
-                    fileName,
+                    fileName1,
                 )
 
                 # Upload resultfrombn.yaml to MinIO
                 minio_client.fput_object(
                     minio_bucket,
                     "resultfrombn-"+ end + ".yaml",
-                    fileName,
+                    fileName2,
                 )
 
             volumeMounts:
