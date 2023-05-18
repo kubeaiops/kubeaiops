@@ -368,8 +368,7 @@ spec:
               with open(fileName2, "w") as f:
                 f.write(str(str(responseTotal)))
 
-              if "{{ .Values.minio.enabled }}" and anomaly :
-
+              if "{{ .Values.minio.enabled }}" and anomaly == "true":
                 # Fetch MinIO secret from Kubernetes
                 config.load_incluster_config()
                 v1 = client.CoreV1Api()
