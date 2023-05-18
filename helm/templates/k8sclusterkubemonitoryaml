@@ -14,10 +14,8 @@ spec:
         value: {{ .Values.monitoring.prometheusAddress }}
       - name: workflow-param-2
         value: {{ .Values.email.emailAddress }}
-      - name: workflow-param-3
-        value: {{ .Values.email.mailgunKey }}
-      - name: workflow-param-4
-        value: {{ .Values.email.mailgunServer }}
+      - name: workflow-param-3    
+        value: {{ .Values.email.mailKey }}
   workflow:
     selector: {{ include "kubeaiops.fullname" . }}-k8sbasic
     namespace: {{ .Release.Namespace }}
@@ -39,9 +37,7 @@ spec:
           - name: workflow-param-2
             value: {{ .Values.email.emailAddress }}
           - name: workflow-param-3    
-            value: {{ .Values.email.mailgunKey }}
-          - name: workflow-param-4
-            value: {{ .Values.email.mailgunServer }}
+            value: {{ .Values.email.mailKey }}
         entrypoint: process-kubeaiops
         volumes:
         - name: task-pv-storage
@@ -98,8 +94,6 @@ spec:
                   value: {{`"{{workflow.parameters.workflow-param-2}}"`}}
                 - name: email-key
                   value: {{`"{{workflow.parameters.workflow-param-3}}"`}}
-                - name: email-api
-                  value: {{`"{{workflow.parameters.workflow-param-4}}"`}}
                 - name: anomaly
                   value: {{`"{{steps.evaluate-resources.outputs.parameters.anomaly}}"`}}
 
@@ -615,7 +609,6 @@ spec:
             parameters:
               - name: email
               - name: email-key
-              - name: email-api
               - name: anomaly
           container:
             image: repo.kubeaiops.com/lab/helm-kubectl:latest
@@ -625,15 +618,20 @@ spec:
             - |
               cd /tmp
               cat evaluation.txt
-              attachment=`cat metricImageName.txt`
-              report=`cat evaluation.txt`
-              output=$(curl -s --user {{`{{inputs.parameters.email-key}}`}} {{`{{inputs.parameters.email-api}}`}} \
-              -F from={{`{{inputs.parameters.email}}`}} -F to={{`{{inputs.parameters.email}}`}} \
-              -F subject='KubeAIOPS Anomaly Report' -F text="${report}" ${attachment} -F attachment=@k8s-report.pdf)
-              echo "curl response:"
-              echo "$output"
-              echo "-----end of evaluation"
+              attachment=$(cat metricImageName.txt)
+              report=$(cat evaluation.txt)
+              curl -s --url "smtps://smtp.gmail.com:465" --ssl-reqd --mail-from "{{inputs.parameters.email}}" \
+              --mail-rcpt "{{inputs.parameters.email}}" --user "{{inputs.parameters.email}}" \
+              --password "{{inputs.parameters.email-key}}" \
+              --upload-file k8s-report.pdf --insecure <<EOF
+              Subject: KubeAIOPS Anomaly Report
+              From: {{inputs.parameters.email}}
+              To: {{inputs.parameters.email}}
 
+              ${report}
+              EOF
+              echo "Email sent successfully"
+              echo "-----end of evaluation"
             volumeMounts:
               - mountPath: "/tmp"
                 name: task-pv-storage

@@ -6,8 +6,7 @@ replicaCount: 1
 
 # Monitoring target cluster's information
 # Prometheus address sample -  "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
-# Mailgun address sample - "https://api.mailgun.net/v3/mail-domain/messages"
-# Mailgun kep sample - "api:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# for gmail user, mailKey - app password - https://support.google.com/accounts/answer/185833?hl=en
 monitoring:
   prometheusAddress: "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
   anomalyThreshold: "0.8"
@@ -15,8 +14,7 @@ monitoring:
 
 email:
   emailAddress: "aa11"
-  mailgunServer: "aa11"
-  mailgunKey: "aa11"
+  mailKey: "aa11"
 
 minio:
   enabled: true
