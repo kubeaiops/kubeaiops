@@ -259,6 +259,10 @@ spec:
             source: |
               import requests
               import json
+              import minio
+              import base64
+              from kubernetes import client, config
+
               anomalyThreshold = {{ .Values.monitoring.anomalyThreshold }}
               from datetime import datetime, timedelta
               input_alerts = {{`{{inputs.parameters.firing-alerts}}`}}
@@ -273,6 +277,7 @@ spec:
               anomaly= "false"
               responseTotal = list()
               i = 1
+
               for alerts in input_alerts:
                 #print ('alert', str(alerts))
 
@@ -361,6 +366,50 @@ spec:
               fileName = "/tmp/resultfrombn.yaml"
               with open(fileName, "w") as f:
                 f.write(str(str(responseTotal)))
+
+              if "{{ .Values.minio.enabled }}" :
+
+                # Fetch MinIO secret from Kubernetes
+                config.load_incluster_config()
+                v1 = client.CoreV1Api()
+                secret_name = "{{ .Release.Name}}-minio"
+                secret = v1.read_namespaced_secret(secret_name, "{{ .Release.Namespace }}")
+                minio_access_key = base64.b64decode(secret.data["accesskey"]).decode("utf-8")
+                minio_secret_key = base64.b64decode(secret.data["secretkey"]).decode("utf-8")
+
+                # MinIO configuration
+                minio_endpoint = "{{ .Release.Name }}-minio.{{ .Release.Namespace }}.svc.cluster.local:9000"
+                minio_bucket = "{{ .Values.minio.config.bucket }}"
+
+                # Create MinIO client
+                minio_client = minio.Minio(
+                    minio_endpoint,
+                    access_key=minio_access_key,
+                    secret_key=minio_secret_key,
+                    secure=False,
+                )
+
+                # Check if the bucket exists
+                bucket_exists = minio_client.bucket_exists(minio_bucket)
+
+                # Create the bucket if it doesn't exist
+                if not bucket_exists:
+                    minio_client.make_bucket(minio_bucket)
+
+                # Upload anomaly.txt to MinIO
+                minio_client.fput_object(
+                    minio_bucket,
+                    "anomaly-" + end + ".txt",
+                    fileName,
+                )
+
+                # Upload resultfrombn.yaml to MinIO
+                minio_client.fput_object(
+                    minio_bucket,
+                    "resultfrombn-"+ end + ".yaml",
+                    fileName,
+                )
+
             volumeMounts:
               - mountPath: "/tmp"
                 name: task-pv-storage   
