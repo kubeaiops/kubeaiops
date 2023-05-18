@@ -13,8 +13,8 @@ monitoring:
   cron: "*/5 * * * *"
 
 email:
-  emailAddress: "aa11"
-  mailKey: "aa11"
+  emailAddress: "test@test.com"
+  mailKey: "xxx"
 
 minio:
   enabled: true

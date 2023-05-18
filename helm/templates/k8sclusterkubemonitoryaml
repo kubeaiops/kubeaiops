@@ -620,14 +620,13 @@ spec:
               cat evaluation.txt
               attachment=$(cat metricImageName.txt)
               report=$(cat evaluation.txt)
-              curl -s --url "smtps://smtp.gmail.com:465" --ssl-reqd --mail-from "{{inputs.parameters.email}}" \
-              --mail-rcpt "{{inputs.parameters.email}}" --user "{{inputs.parameters.email}}" \
-              --password "{{inputs.parameters.email-key}}" \
+              curl -s --url "smtps://smtp.gmail.com:465" --ssl-reqd --mail-from {{`{{inputs.parameters.email}}`}} \
+              --mail-rcpt {{`{{inputs.parameters.email}}`}} --user {{`{{inputs.parameters.email}}`}} \
+              --password {{`{{inputs.parameters.email-key}}`}} \
               --upload-file k8s-report.pdf --insecure <<EOF
               Subject: KubeAIOPS Anomaly Report
-              From: {{inputs.parameters.email}}
-              To: {{inputs.parameters.email}}
-
+              From: {{`{{inputs.parameters.email}}`}}
+              To: {{`{{inputs.parameters.email}}`}}
               ${report}
               EOF
               echo "Email sent successfully"
