@@ -359,6 +359,7 @@ spec:
                     responseTotal.append(responseJson)
                 i += 1
 
+              print ('anomaly - ', anomaly)
               fileName1 = "/tmp/anomaly.txt"
               with open(fileName1, "w") as f:
                 f.write(anomaly) #in case there is no anomaly
@@ -367,7 +368,7 @@ spec:
               with open(fileName2, "w") as f:
                 f.write(str(str(responseTotal)))
 
-              if "{{ .Values.minio.enabled }}" :
+              if "{{ .Values.minio.enabled }}" and anomaly :
 
                 # Fetch MinIO secret from Kubernetes
                 config.load_incluster_config()
@@ -395,13 +396,6 @@ spec:
                 # Create the bucket if it doesn't exist
                 if not bucket_exists:
                     minio_client.make_bucket(minio_bucket)
-
-                # Upload anomaly.txt to MinIO
-                minio_client.fput_object(
-                    minio_bucket,
-                    "anomaly-" + end + ".txt",
-                    fileName1,
-                )
 
                 # Upload resultfrombn.yaml to MinIO
                 minio_client.fput_object(
