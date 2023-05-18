@@ -11,7 +11,7 @@ metadata:
   namespace: km
 spec:
   # TODO(user): Add fields here
-  cron: "*/5 * * * *"
+  cron: "*/2 * * * *"
   maxWorkflowCount: 5
   arguments:
     parameters:
@@ -58,16 +58,6 @@ spec:
               configMapKeyRef:
                 name: my-minio-config
                 key: bucket
-          - name: access-key
-            valueFrom:
-              secretKeyRef:
-                name: my-minio-secret
-                key: access-key
-          - name: secret-key
-            valueFrom:
-              secretKeyRef:
-                name: my-minio-secret
-                key: secret-key            
         entrypoint: process-metricops
         podGC:
           strategy: OnWorkflowSuccess
@@ -99,11 +89,6 @@ spec:
                   value: "{{workflow.parameters.endpoint}}"
                 - name: bucket
                   value: "{{workflow.parameters.bucket}}"
-                - name: access-key
-                  value: "{{workflow.parameters.access-key}}"
-                - name: secret-key
-                  value: "{{workflow.parameters.secret-key}}"
-
           - - name: evaluate-resources
               template: evaluate-resources
               arguments:
@@ -147,8 +132,7 @@ spec:
               - name: prometheus-address
               - name: endpoint
               - name: bucket
-              - name: access-key
-              - name: secret-key
+
           script:
             image: repo.kubeaiops.com/lab/python-requests:latest
             command: [python]
@@ -157,13 +141,14 @@ spec:
               import requests
               import json
               from minio import Minio
-              from minio.error import ResponseError
+              from minio.error import S3Error
+              import os
 
               # Initialize Minio client
               minClient = Minio(
                   "{{inputs.parameters.endpoint}}",  # MinIO service endpoint
-                  access_key="{{inputs.parameters.access-key}}",
-                  secret_key="{{inputs.parameters.secret-key}}",
+                  access_key=os.environ.get('access-key'),
+                  secret_key=os.environ.get('secret-key'),
                   secure=False,  # Disable SSL/TLS (use http instead of https)
               )              
 
@@ -280,9 +265,25 @@ spec:
                 json.dumps(alert_list_per_resource).encode("utf-8"),
                 len(json.dumps(alert_list_per_resource)),
               )   
+
             volumeMounts:
               - mountPath: "/temp"
                 name: ml-volume
+              - mountPath: "/secret/mountpath"
+                name: my-minio-secret                
+
+            env:
+            - name: access-key
+              valueFrom:
+                secretKeyRef:
+                  name: my-minio-secret 
+                  key: accesskey
+            - name: secret-key
+              valueFrom:
+                secretKeyRef:
+                  name: my-minio-secret 
+                  key: secretkey
+
           outputs:
             parameters:
             - name: firing-alerts
@@ -295,7 +296,7 @@ spec:
             command: 
               - sh
               - -c
-              - kubectl run bn -n kubemonitor --image=repo.kubeaiops.com/lab/bn:latest --port=3399 --labels="app=bn"
+              - kubectl run bn -n km --image=repo.kubeaiops.com/lab/bn:latest --port=3399 --labels="app=bn"
         
         - name: create-bn-service
           resource:
@@ -305,7 +306,7 @@ spec:
               kind: Service
               metadata:
                 name: bn
-                namespace: kubemonitor
+                namespace: km
               spec:
                 type: ClusterIP
                 selector:
@@ -447,7 +448,7 @@ spec:
             command: 
               - sh
               - -c
-              - kubectl delete service bn -n kubemonitor --ignore-not-found
+              - kubectl delete service bn -n km --ignore-not-found
 
         - name: delete-bn-pod
           container:
@@ -455,7 +456,7 @@ spec:
             command: 
               - sh
               - -c
-              - kubectl delete pod bn -n kubemonitor --ignore-not-found
+              - kubectl delete pod bn -n km --ignore-not-found
         
         - name: execute-resolution
           inputs:

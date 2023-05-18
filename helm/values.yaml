@@ -18,21 +18,19 @@ email:
   mailgunServer: "aa11"
   mailgunKey: "aa11"
 
-artifactRepository:
+minio:
+  enabled: true
+  accessKey: "minio"
+  secretKey: "minio123!" 
   config:
-    enabled: true
     name: my-minio-config
-    endpoint: minio.minio.svc.cluster.local:9000
     bucket: kubeaiops 
-  secret:
-    enabled: true
-    name: my-minio-secret
-    accesskey:
-      name: accesskey
-      key:  minio
-    secretkey:
-      name: secretkey
-      key: minio123!
+  persistence:
+    storageClass: ""
+    VolumeName: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
+
 
 image:
   repository: repo.kubeaiops.com/lab/kubeaiops

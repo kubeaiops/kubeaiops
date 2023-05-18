@@ -1,0 +1,13 @@
+{{- if .Values.minio.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.minio.config.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeaiops.labels" . | nindent 4 }}
+    workflows.argoproj.io/configmap-type: Parameter
+data:
+  endpoint: {{ .Release.Name }}-minio.{{ .Release.Namespace }}.svc.cluster.local:9000
+  bucket: {{ .Values.minio.config.bucket }}
+{{- end }}  

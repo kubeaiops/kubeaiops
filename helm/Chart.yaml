@@ -27,3 +27,7 @@ dependencies:
   name: argo
   repository: https://repo.kubeaiops.com/lab/chartrepo/argo
   version: 0.0.1
+- condition: minio.enabled
+  name: minio
+  repository: https://repo.kubeaiops.com/lab/chartrepo/minio
+  version: 0.0.1  

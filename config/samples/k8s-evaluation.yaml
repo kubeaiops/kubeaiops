@@ -1,0 +1,173 @@
+apiVersion: aiops.kubeaiops.com/v1alpha1
+kind: KubeMonitor
+metadata:
+  labels:
+    app.kubernetes.io/name: kubemonitor
+    app.kubernetes.io/instance: km-evaluate-metrics
+    app.kubernetes.io/part-of: kubeaiops
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kubeaiops  
+  name: km-evaluate-metrics
+  namespace: km
+spec:
+  # TODO(user): Add fields here
+  cron: "*/30 * * * *"
+  maxWorkflowCount: 5
+  arguments:
+    parameters: []  
+  workflow:
+    selector: km-evaluate-metrics
+    namespace: km
+    source: |-
+      apiVersion: argoproj.io/v1alpha1
+      kind: Workflow
+      metadata:
+        labels:
+          serviceAccountName: km-kubeaiops
+        generateName: km-evaluate-metrics-
+      spec:
+        workflowMetadata:
+          labels:
+            aiops.kubeaiops.com/selector: km-evaluate-metrics
+        serviceAccountName: km-kubeaiops
+        arguments:
+          parameters:
+          - name: endpoint
+            valueFrom:
+              configMapKeyRef:
+                name: my-minio-config
+                key: endpoint
+          - name: bucket
+            valueFrom:
+              configMapKeyRef:
+                name: my-minio-config
+                key: bucket
+        entrypoint: process-metricops
+        podGC:
+          strategy: OnWorkflowSuccess
+        volumes:
+        - name: my-minio-secret
+          secret:
+            secretName: my-minio-secret
+        templates:
+        - name: process-metricops
+          steps:
+          - - name: evaluate-metrics
+              template: evaluate-metrics
+              arguments:
+                parameters:
+                - name: endpoint
+                  value: "{{workflow.parameters.endpoint}}"
+                - name: bucket
+                  value: "{{workflow.parameters.bucket}}"
+
+        - name: evaluate-metrics
+          inputs:
+            parameters:
+              - name: endpoint
+              - name: bucket
+          script:
+            image: repo.kubeaiops.com/lab/python-requests:latest
+            command: [python]
+            source: |
+              import time
+              import requests
+              import json
+              from minio import Minio
+              from minio.error import S3Error
+              import os
+              import io
+              import pandas as pd
+              import logging
+              from functools import partial, reduce
+              import numpy as np
+              from sklearn.preprocessing import MinMaxScaler
+              from tensorflow.keras.layers import Dense, Input
+              from tensorflow.keras.models import Model, load_model
+              
+              # Set up logging
+              logging.basicConfig(level=logging.INFO)
+              
+              timestr = time.strftime("%Y%m%d-%H%M")
+              # Initialize Minio client
+              minClient = Minio(
+                  "{{inputs.parameters.endpoint}}",  # MinIO service endpoint
+                  access_key=os.environ.get('access-key'),
+                  secret_key=os.environ.get('secret-key'),
+                  secure=False,  # Disable SSL/TLS (use http instead of https)
+              )        
+
+              bucket = "{{inputs.parameters.bucket}}"
+              file_name = "metric.csv"
+              found = minClient.bucket_exists(bucket)
+              if not found:
+                  minClient.make_bucket(bucket)
+
+              try:
+                object_exists = minClient.stat_object(bucket, file_name)
+                if object_exists:
+                    # If the file exists, download it to a pandas DataFrame
+                    data = minClient.get_object(bucket, file_name)
+                    df = pd.read_csv(io.BytesIO(data.read()))
+
+                    x_train = df.iloc[:,2:] # dropping metadata columns
+                    x_train = x_train.fillna(0)
+                    x_train.replace(np.nan,0, inplace=True)
+                    x_train.replace(np.inf,1000, inplace=True)
+                    x_train.replace(-np.inf,-1000, inplace=True)
+                    x_train.head()
+                    scaler = MinMaxScaler().fit(x_train) ## normalize metric data 
+                    x_train = scaler.transform(x_train)
+                    x_train = x_train.astype('float32') ## make all data as float type. no int ​
+                    input_dim = x_train.shape[1]
+                    print("input dim", input_dim)
+                    input_layer = Input(shape=(input_dim,))
+                    encoder = Dense(input_dim, activation='tanh')(input_layer) 
+                    # The purpose of the tanh activation function is to squash the input values into the range of [-1, 1], which can be useful for normalization or to reduce the impact of outliers.
+                    encoder = Dense(int(input_dim /2), activation='relu')(encoder)
+                    # ReLU -rectified linear unit is used in neural networks because it is computationally efficient and has been shown to be effective in preventing the vanishing gradient problem.
+                    decoder = Dense(int(input_dim /2), activation='relu')(encoder)
+                    # Sigmoid activation is commonly used in the output layer of binary classification models, where the goal is to predict a binary label (e.g., true/false, 0/1)
+                    decoder = Dense(input_dim, activation='sigmoid')(decoder)
+                    autoencoder = Model(inputs=input_layer, outputs=decoder)
+                    autoencoder.compile(optimizer='adam', loss='mean_squared_error')
+                    autoencoder.fit(x_train, x_train, epochs=50, batch_size=512, verbose=2)
+                    model_name = 'autoencoder_unsupervised1.h5'
+                    autoencoder.save(model_name)
+                    model = load_model(model_name)
+                    # predict from the mdoel 
+                    x_pred = model.predict(x_train)
+                    mse = np.mean(np.power(x_train - x_pred, 2), axis=1)
+                    # reconstruct the dataframe with the prediction result 
+                    result_df = df.copy()
+                    result_df['mse'] = mse
+                    result_df = result_df.sort_values(by=['mse'], ascending=False)
+                    result_df.reset_index(inplace=True, drop=True)
+                    result_df.head(1000)
+                    result_df_name = 'predicted' + timestr + '.csv'
+                    result_df.to_csv(result_df_name)
+
+                minClient.put_object(
+                    bucket,
+                    result_df_name,
+                    io.BytesIO(result_df.to_csv(index=False).encode('utf-8')),
+                    len(result_df.to_csv(index=False).encode('utf-8')),                )
+              except Exception as e:
+                # Handle exceptions gracefully
+                logging.error(f"Error while checking if the object exists: {str(e)}")
+
+            env:
+            - name: access-key
+              valueFrom:
+                secretKeyRef:
+                  name: my-minio-secret 
+                  key: accessKey
+            - name: secret-key
+              valueFrom:
+                secretKeyRef:
+                  name: my-minio-secret 
+                  key: secretKey
+
+            volumeMounts:
+              - mountPath: "/secret/mountpath"
+                name: my-minio-secret

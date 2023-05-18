@@ -3,11 +3,11 @@ kind: KubeMonitor
 metadata:
   labels:
     app.kubernetes.io/name: kubemonitor
-    app.kubernetes.io/instance: kubemonitor-basicmonitor
+    app.kubernetes.io/instance: km-collect-metrics
     app.kubernetes.io/part-of: kubeaiops
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: kubeaiops  
-  name: km-sample
+  name: km-collect-metrics
   namespace: km
 spec:
   # TODO(user): Add fields here
@@ -18,7 +18,7 @@ spec:
       - name: workflow-param-1
         value: "http://kps-kube-prometheus-stack-prometheus.monitor.svc.cluster.local:9090"
   workflow:
-    selector: km-sample
+    selector: km-collect-metrics
     namespace: km
     source: |-
       apiVersion: argoproj.io/v1alpha1
@@ -26,11 +26,11 @@ spec:
       metadata:
         labels:
           serviceAccountName: km-kubeaiops
-        generateName: k8s-monitor-
+        generateName: km-collect-metrics-
       spec:
         workflowMetadata:
           labels:
-            aiops.kubeaiops.com/selector: km-sample
+            aiops.kubeaiops.com/selector: km-collect-metrics
         serviceAccountName: km-kubeaiops
         arguments:
           parameters:
@@ -255,14 +255,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: my-minio-secret 
-                  key: accesskey
+                  key: accessKey
             - name: secret-key
               valueFrom:
                 secretKeyRef:
                   name: my-minio-secret 
-                  key: secretkey
+                  key: secretKey
 
             volumeMounts:
               - mountPath: "/secret/mountpath"
                 name: my-minio-secret
-          
