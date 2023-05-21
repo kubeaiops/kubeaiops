@@ -474,7 +474,8 @@ spec:
                 resolution = eval['resolution_action']
                 if not resolution:
                   print ('No resolution')
-                  continue
+                  # JY to produce evaluation report when no resolution  
+                  #continue
                 resolution.sort(key=lambda x: x.get('no'))
                 print ('eval----', eval)
                 if 'node' in eval:
@@ -561,7 +562,9 @@ spec:
 
                     plt.title(title)
                     filename = "/tmp/metrics" + str(i) + ".png"
-                    metricImageNameString = metricImageNameString + " -F attachment=@metrics" + str(i) + ".png"
+                    # modify for gmail file attach
+                    #metricImageNameString = metricImageNameString + " -F attachment=@metrics" + str(i) + ".png"
+                    metricImageNameString = metricImageNameString + " " + str(i) + ".png "
                     plt.savefig(filename, format="png", dpi=1200)
                     plt.close()
                     i = i + 1
@@ -605,6 +608,11 @@ spec:
               fileName = "/tmp/metricImageName.txt"
               with open(fileName, "w") as f:
                 f.write(metricImageNameString)
+              #check poin JY
+              print ('k8sResultReport', k8sResultReport)
+              print ('evaluationReport', evaluationReport)
+              print ('metricImageNameString', metricImageNameString)
+
 
               #convert response of k8s execution to POD file
               pdf = FPDF(orientation="landscape", format="letter")
@@ -659,20 +667,95 @@ spec:
             - -c 
             - |
               cd /tmp
+              #test
+              ls -al > ls.txt
+              cat ls.txt
               cat evaluation.txt
               attachment=$(cat metricImageName.txt)
               report=$(cat evaluation.txt)
-              curl -s --url "smtps://smtp.gmail.com:465" --ssl-reqd --mail-from {{`{{inputs.parameters.email}}`}} \
-              --mail-rcpt {{`{{inputs.parameters.email}}`}} --user {{`{{inputs.parameters.email}}`}} \
-              --password {{`{{inputs.parameters.email-key}}`}} \
-              --upload-file k8s-report.pdf --insecure <<EOF
-              Subject: KubeAIOPS Anomaly Report
-              From: {{`{{inputs.parameters.email}}`}}
+              file_upload="data.txt"
+              mail_from="KubeAIOps Team <'contact@kubeaiops.com'>"
+              # html message to send
+              echo "<html>
+              <body>
+                <div>
+                    <p>Hello, </p>
+                    <p>Please see anomaly report and attached files</p>
+                    <p> ${report} </p>
+                    <p> ${attachment} </p>
+                    <p>KubeAIOps Team</p>
+                    <img src=\"cid:kubeaiops.png\" width=\"300\" height=\"86\">
+                </div>
+              </body>
+              </html>" > message.html
+              function add_file {
+              echo "--MULTIPART-MIXED-BOUNDARY
+              Content-Type: $1
+              Content-Transfer-Encoding: base64" >> "$file_upload"
+                if [ ! -z "$2" ]; then
+                    echo "Content-Disposition: inline
+              Content-Id: <$2>" >> "$file_upload"
+                else
+                    echo "Content-Disposition: attachment; filename=$4" >> "$file_upload"
+              fi
+              echo "$3
+              " >> "$file_upload"
+              }
+              message_base64=$(cat message.html | base64)
+              
+              echo "From: $mail_from
               To: {{`{{inputs.parameters.email}}`}}
-              ${report}
-              EOF
-              echo "Email sent successfully"
-              echo "-----end of evaluation"
+              Subject: KubeAIOps anomaly Report
+              MIME-Version: 1.0
+              Content-Type: multipart/mixed; boundary=\"MULTIPART-MIXED-BOUNDARY\"
+              
+              --MULTIPART-MIXED-BOUNDARY
+              Content-Type: multipart/alternative; boundary=\"MULTIPART-ALTERNATIVE-BOUNDARY\"
+              
+              --MULTIPART-ALTERNATIVE-BOUNDARY
+              Content-Type: text/html; charset=utf-8
+              Content-Transfer-Encoding: base64
+              Content-Disposition: inline
+
+              $message_base64
+              --MULTIPART-ALTERNATIVE-BOUNDARY--" > "$file_upload"
+
+              # add an logo image with corresponding content-id (here kubeaiops.png)
+              image_base64=$(curl -s "https://www.kubeaiops.com/wp-content/uploads/2023/02/KAIOs_BI_for-site-300x86.png" | base64)
+              add_file "image/png" "kubeaiops.png" "$image_base64"
+
+              # add metric img (to be updated to add multi files...)
+              #image_base64=$(base64 -i ./metrics0.png)
+              #add_file "image/png" "" "$image_base64" "metrics0.png"
+
+              for i in $attachement
+              do
+                #echo $i
+                imagex_base64=$(base64 -i ./$i)
+                add_file "image/png" "" "$imagex_base64" "$i"
+                imagex_base64=""         
+              done
+
+              # add report pdf
+              if [ -f "k8s-report.pdf" ]; then
+                echo "FILE exists."
+                pdf_base64=$(base64 -i ./k8s-report.pdf)
+                add_file "application/pdf" "" "$pdf_base64" "k8s-report.pdf"
+              else
+                echo "FILE does not exist."
+              fi
+              
+              # end of uploaded file
+              echo "--MULTIPART-MIXED-BOUNDARY--" >> "$file_upload"
+
+              # send email
+              output=$(curl -s --url "smtps://smtp.gmail.com:465" --ssl-reqd --mail-from {{`{{inputs.parameters.email}}`}} \
+              --mail-rcpt {{`{{inputs.parameters.email}}`}} --user {{`{{inputs.parameters.email}}`}}:{{`{{inputs.parameters.email-key}}`}} \
+              --upload-file "$file_upload" --insecure --verbose)
+              echo "curl response:"
+              echo "$output"
+              #echo "Email sent successfully"
+              #echo "-----end of evaluation"
             volumeMounts:
               - mountPath: "/tmp"
                 name: task-pv-storage
