@@ -473,9 +473,8 @@ spec:
 
                 resolution = eval['resolution_action']
                 if not resolution:
-                  # JY to produce evaluation report when no resolution
                   print ('No resolution')
-                  #continue
+                  continue
                 resolution.sort(key=lambda x: x.get('no'))
                 print ('eval----', eval)
                 if 'node' in eval:
