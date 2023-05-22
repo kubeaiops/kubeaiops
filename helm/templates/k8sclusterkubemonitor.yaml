@@ -662,7 +662,7 @@ spec:
             - |
               cd /tmp
               cat evaluation.txt
-              attachement=$(cat metricImageName.txt)
+              attachment=$(cat metricImageName.txt)
               report=$(cat evaluation.txt)
               file_upload="data.txt"
               # html message to send
@@ -672,7 +672,7 @@ spec:
                     <p>Hello, </p>
                     <p>Please see anomaly report and attached files</p>
                     <p> ${report} </p>
-                    <p> Attachement : ${attachement} </p>
+                    <p> Attachment : ${attachment} </p>
                     <p>KubeAIOps Team</p>
                     <img src=\"cid:kubeaiops.png\" width=\"300\" height=\"86\">
                 </div>
@@ -716,7 +716,7 @@ spec:
               add_file "image/png" "kubeaiops.png" "$image_base64"
 
               # attach metrics.png files
-              for i in $attachement
+              for i in $attachment
               do
                 echo "attachment: " $i
                 imagex_base64=$(base64 -i ./$i)
