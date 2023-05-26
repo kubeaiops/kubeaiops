@@ -140,19 +140,22 @@ spec:
 
                   if 'node' in labels: 
                     node = alerts["labels"]["node"]
-                    if node not in nodelist:
-                      nodelist.append({'node': node, 'namespace': namespace})
+                    if node not in [item['node'] for item in nodelist]:
+                    #if node not in nodelist:
+                      nodelist.append({'node': node})
                     #print("node: " + node)
 
                   if 'pod' in labels: 
                     pod = alerts["labels"]["pod"]
-                    if pod not in podlist:
+                    if not any(item['pod'] == pod and item['namespace'] == namespace for item in podlist):
+                    #if pod not in podlist:
                       podlist.append({'pod': pod, 'namespace': namespace})
                     #print("pod: " + pod)
         
                   if 'persistentvolumeclaim' in labels: 
                     pvc = alerts["labels"]["persistentvolumeclaim"]
-                    if pvc not in pvclist:
+                    if not any(item['pvc'] == pvc and item['namespace'] == namespace for item in pvclist):
+                    #if pvc not in pvclist:
                       pvclist.append({'pvc': pvc, 'namespace': namespace})
                     #print("pvc: " + pvc)
 
@@ -162,6 +165,9 @@ spec:
                   alerts_pod.append({'pod': pod, 'alert': alertName + severity.capitalize()})
                 if state == 'firing' and pvc != '':
                   alerts_pvc.append({'pvc': pvc, 'alert': alertName + severity.capitalize()})
+                
+                # clear to reduce input alerts noise(ex:WatchDog)
+                node, pod, pvc, namespace = '', '', '', ''
 
               #create node view on alerts
               for n in nodelist:
@@ -561,7 +567,9 @@ spec:
 
                     plt.title(title)
                     filename = "/tmp/metrics" + str(i) + ".png"
-                    metricImageNameString = metricImageNameString + " -F attachment=@metrics" + str(i) + ".png"
+                    # modified for gmail file attachment - JY
+                    #metricImageNameString = metricImageNameString + " -F attachment=@metrics" + str(i) + ".png"
+                    metricImageNameString = metricImageNameString + "metrics" + str(i) + ".png "
                     plt.savefig(filename, format="png", dpi=1200)
                     plt.close()
                     i = i + 1
@@ -662,17 +670,88 @@ spec:
               cat evaluation.txt
               attachment=$(cat metricImageName.txt)
               report=$(cat evaluation.txt)
-              curl -s --url "smtps://smtp.gmail.com:465" --ssl-reqd --mail-from {{`{{inputs.parameters.email}}`}} \
-              --mail-rcpt {{`{{inputs.parameters.email}}`}} --user {{`{{inputs.parameters.email}}`}} \
-              --password {{`{{inputs.parameters.email-key}}`}} \
-              --upload-file k8s-report.pdf --insecure <<EOF
-              Subject: KubeAIOPS Anomaly Report
-              From: {{`{{inputs.parameters.email}}`}}
+              firingalerts=$(cat firing-alerts.yaml)
+              file_upload="data.txt"
+              # html message to send
+              echo "<html>
+              <body>
+                <div>
+                    <p>Hello, </p>
+                    <p>Please see anomaly report and attached files</p>
+                    <p> ${report} </p>
+                    <p> <b>Attachment : </b> ${attachment} </p>
+                    <p> <b>firing-alerts : </b> ${firingalerts} </p> 
+                    <p>KubeAIOps Team</p>
+                    <img src=\"cid:kubeaiops.png\" width=\"300\" height=\"86\">
+                </div>
+              </body>
+              </html>" > message.html
+              # s1:context-type , s2: content-id , s3: encoded contents , s4: file name for attach
+              function add_file {
+              echo "--MULTIPART-MIXED-BOUNDARY
+              Content-Type: $1
+              Content-Transfer-Encoding: base64" >> "$file_upload"
+                if [ ! -z "$2" ]; then
+                    echo "Content-Disposition: inline
+              Content-Id: <$2>" >> "$file_upload"
+                else
+                    echo "Content-Disposition: attachment; filename=$4" >> "$file_upload"
+                fi
+              echo "$3
+              " >> "$file_upload"
+              }
+              message_base64=$(cat message.html | base64)
+              
+              echo "From: KubeAIOps Team
               To: {{`{{inputs.parameters.email}}`}}
-              ${report}
-              EOF
-              echo "Email sent successfully"
-              echo "-----end of evaluation"
+              Subject: KubeAIOps anomaly Report
+              MIME-Version: 1.0
+              Content-Type: multipart/mixed; boundary=\"MULTIPART-MIXED-BOUNDARY\"
+              
+              --MULTIPART-MIXED-BOUNDARY
+              Content-Type: multipart/alternative; boundary=\"MULTIPART-ALTERNATIVE-BOUNDARY\"
+              
+              --MULTIPART-ALTERNATIVE-BOUNDARY
+              Content-Type: text/html; charset=utf-8
+              Content-Transfer-Encoding: base64
+              Content-Disposition: inline
+
+              $message_base64
+              --MULTIPART-ALTERNATIVE-BOUNDARY--" > "$file_upload"
+
+              # add an logo image with corresponding content-id (here kubeaiops.png)
+              image_base64=$(curl -s "https://www.kubeaiops.com/wp-content/uploads/2023/02/KAIOs_BI_for-site-300x86.png" | base64)
+              add_file "image/png" "kubeaiops.png" "$image_base64"
+
+              # attach metrics.png files
+              for i in $attachment
+              do
+                echo "attachment: " $i
+                imagex_base64=$(base64 -i ./$i)
+                add_file "image/png" "" "$imagex_base64" "$i"
+                imagex_base64=""         
+              done
+
+              # add report pdf
+              if [ -f "k8s-report.pdf" ]; then
+                echo "attachment: k8s-report.pdf"
+                pdf_base64=$(base64 -i ./k8s-report.pdf)
+                add_file "application/pdf" "" "$pdf_base64" "k8s-report.pdf"
+              else
+                echo "no k8s-report.pdf"
+              fi
+              
+              # end of uploaded file
+              echo "--MULTIPART-MIXED-BOUNDARY--" >> "$file_upload"
+
+              # send email
+              output=$(curl -s --url "smtps://smtp.gmail.com:465" --ssl-reqd --mail-from {{`{{inputs.parameters.email}}`}} \
+              --mail-rcpt {{`{{inputs.parameters.email}}`}} --user {{`{{inputs.parameters.email}}`}}:{{`{{inputs.parameters.email-key}}`}} \
+              --upload-file "$file_upload" --insecure)
+              #echo "curl response:"
+              echo "$output"
+              #echo "Email sent successfully"
+              echo "-----end of send mail"
             volumeMounts:
               - mountPath: "/tmp"
                 name: task-pv-storage
