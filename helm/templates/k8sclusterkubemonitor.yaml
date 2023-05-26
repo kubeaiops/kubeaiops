@@ -140,19 +140,22 @@ spec:
 
                   if 'node' in labels: 
                     node = alerts["labels"]["node"]
-                    if node not in nodelist:
-                      nodelist.append({'node': node, 'namespace': namespace})
+                    if node not in [item['node'] for item in nodelist]:
+                    #if node not in nodelist:
+                      nodelist.append({'node': node})
                     #print("node: " + node)
 
                   if 'pod' in labels: 
                     pod = alerts["labels"]["pod"]
-                    if pod not in podlist:
+                    if not any(item['pod'] == pod and item['namespace'] == namespace for item in podlist):
+                    #if pod not in podlist:
                       podlist.append({'pod': pod, 'namespace': namespace})
                     #print("pod: " + pod)
         
                   if 'persistentvolumeclaim' in labels: 
                     pvc = alerts["labels"]["persistentvolumeclaim"]
-                    if pvc not in pvclist:
+                    if not any(item['pvc'] == pvc and item['namespace'] == namespace for item in pvclist):
+                    #if pvc not in pvclist:
                       pvclist.append({'pvc': pvc, 'namespace': namespace})
                     #print("pvc: " + pvc)
 
@@ -162,6 +165,9 @@ spec:
                   alerts_pod.append({'pod': pod, 'alert': alertName + severity.capitalize()})
                 if state == 'firing' and pvc != '':
                   alerts_pvc.append({'pvc': pvc, 'alert': alertName + severity.capitalize()})
+                
+                # clear to reduce input alerts noise(ex:WatchDog)
+                node, pod, pvc, namespace = '', '', '', ''
 
               #create node view on alerts
               for n in nodelist:
@@ -664,6 +670,7 @@ spec:
               cat evaluation.txt
               attachment=$(cat metricImageName.txt)
               report=$(cat evaluation.txt)
+              firingalerts=$(cat firing-alerts.yaml)
               file_upload="data.txt"
               # html message to send
               echo "<html>
@@ -672,7 +679,8 @@ spec:
                     <p>Hello, </p>
                     <p>Please see anomaly report and attached files</p>
                     <p> ${report} </p>
-                    <p> Attachment : ${attachment} </p>
+                    <p> <b>Attachment : </b> ${attachment} </p>
+                    <p> <b>firing-alerts : </b> ${firingalerts} </p> 
                     <p>KubeAIOps Team</p>
                     <img src=\"cid:kubeaiops.png\" width=\"300\" height=\"86\">
                 </div>
